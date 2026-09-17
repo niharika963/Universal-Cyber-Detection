@@ -1,0 +1,10 @@
+duration,protocol,src_bytes,dst_bytes,packets,label
+10,TCP,500,1000,20,Normal
+20,TCP,700,1500,30,Normal
+5,UDP,10000,200,100,DoS
+8,UDP,12000,100,150,DoS
+15,TCP,400,800,15,Normal
+3,TCP,15000,50,200,DoS
+25,TCP,600,1200,25,Normal
+7,ICMP,9000,100,120,Probe
+12,TCP,550,1100,22,Normalc:\Users\durga\Downloads\kddcup99\full_multiclass\full_multiclass\raw\train.csv
