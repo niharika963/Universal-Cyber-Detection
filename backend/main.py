@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+import traceback
 
 import joblib
 import numpy as np
@@ -7,68 +8,53 @@ import pandas as pd
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
-
-# ============================================================
-# IMPORTS
-# ============================================================
-
-from backend.preprocessing.dataset_adapter import (
+from .preprocessing.dataset_adapter import (
     KDD99_FEATURES,
     get_dataset_info,
-    load_and_detect_dataset,
     is_kdd99_compatible,
 )
 
-from backend.model_analysis import run_full_analysis
+from .training.dataset_benchmark import run_dataset_benchmark
+
+try:
+    from .model_analysis import run_full_analysis
+except Exception:
+    run_full_analysis = None
 
 
 # ============================================================
 # PATHS
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
 
-MODEL_DIR = BASE_DIR / "backend" / "models"
-DATASET_DIR = BASE_DIR / "datasets"
+FRONTEND_DIR = PROJECT_DIR / "frontend"
+MODEL_DIR = BASE_DIR / "models"
+DATASET_DIR = PROJECT_DIR / "datasets"
 
-ENCODER_PATH = MODEL_DIR / "encoder.pkl"
 IALP_PATH = MODEL_DIR / "ialp.pkl"
 IFF_PATH = MODEL_DIR / "iff.pkl"
 XGBOOST_PATH = MODEL_DIR / "xgboost.pkl"
-
-DEFAULT_DATASET_PATH = DATASET_DIR / "train.csv"
+ENCODER_PATH = MODEL_DIR / "encoder.pkl"
 
 
 # ============================================================
-# FASTAPI APP
+# FASTAPI
 # ============================================================
 
 app = FastAPI(
     title="Universal Cyber Attack Detection System",
-    description=(
-        "Cyber attack detection using Dataset Adapter, "
-        "IALP, IFF and XGBoost."
-    ),
     version="1.0.0",
 )
 
 
-# ============================================================
-# CORS
-# ============================================================
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
-        "http://127.0.0.1:5501",
-        "http://localhost:5501",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -78,99 +64,70 @@ app.add_middleware(
 # GLOBAL MODELS
 # ============================================================
 
-encoder = None
 ialp_model = None
 iff_model = None
 xgb_model = None
+encoder = None
+
+model_load_error = None
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# MODEL LOADING
 # ============================================================
-
-def convert_to_dataframe(data):
-    """
-    Convert numpy arrays / pandas objects into a DataFrame.
-    """
-
-    if isinstance(data, pd.DataFrame):
-        return data.copy()
-
-    if isinstance(data, pd.Series):
-        return data.to_frame()
-
-    return pd.DataFrame(data)
-
-
-def convert_to_numpy(data):
-    """
-    Convert pandas/numpy data into a numpy array.
-    """
-
-    if isinstance(data, pd.DataFrame):
-        return data.to_numpy(dtype=float)
-
-    if isinstance(data, pd.Series):
-        return data.to_numpy(dtype=float)
-
-    return np.asarray(data, dtype=float)
-
 
 def load_models():
-    """
-    Load all trained models.
-    """
 
-    global encoder
     global ialp_model
     global iff_model
     global xgb_model
+    global encoder
+    global model_load_error
 
-    required_files = [
-        ENCODER_PATH,
-        IALP_PATH,
-        IFF_PATH,
-        XGBOOST_PATH,
-    ]
+    model_load_error = None
 
-    missing_files = [
-        str(path)
-        for path in required_files
-        if not path.exists()
-    ]
-
-    if missing_files:
-        raise FileNotFoundError(
-            "Required model files are missing:\n"
-            + "\n".join(missing_files)
-        )
-
-    encoder = joblib.load(ENCODER_PATH)
-    ialp_model = joblib.load(IALP_PATH)
-    iff_model = joblib.load(IFF_PATH)
-    xgb_model = joblib.load(XGBOOST_PATH)
-
-    print()
-    print("=" * 60)
-    print("CYBER DETECTION MODELS LOADED")
-    print("=" * 60)
-    print("IALP       : Loaded")
-    print("IFF        : Loaded")
-    print("XGBoost    : Loaded")
-    print("Encoder    : Loaded")
-    print("=" * 60)
-    print()
-
-
-# ============================================================
-# STARTUP
-# ============================================================
-
-@app.on_event("startup")
-def startup_event():
     try:
-        load_models()
+
+        if not IALP_PATH.exists():
+            raise FileNotFoundError(
+                f"IALP model not found: {IALP_PATH}"
+            )
+
+        if not IFF_PATH.exists():
+            raise FileNotFoundError(
+                f"IFF model not found: {IFF_PATH}"
+            )
+
+        if not XGBOOST_PATH.exists():
+            raise FileNotFoundError(
+                f"XGBoost model not found: {XGBOOST_PATH}"
+            )
+
+        if not ENCODER_PATH.exists():
+            raise FileNotFoundError(
+                f"Encoder model not found: {ENCODER_PATH}"
+            )
+
+        ialp_model = joblib.load(IALP_PATH)
+        iff_model = joblib.load(IFF_PATH)
+        xgb_model = joblib.load(XGBOOST_PATH)
+        encoder = joblib.load(ENCODER_PATH)
+
+        print()
+        print("=" * 60)
+        print("CYBER DETECTION MODELS LOADED")
+        print("=" * 60)
+        print("IALP       : Loaded")
+        print("IFF        : Loaded")
+        print("XGBoost    : Loaded")
+        print("Encoder    : Loaded")
+        print("=" * 60)
+        print()
+
     except Exception as error:
+
+        model_load_error = str(error)
+
         print()
         print("=" * 60)
         print("MODEL LOADING ERROR")
@@ -179,98 +136,215 @@ def startup_event():
         print("=" * 60)
         print()
 
+        ialp_model = None
+        iff_model = None
+        xgb_model = None
+        encoder = None
+
+
+load_models()
+
 
 # ============================================================
-# ROOT
+# HELPERS
+# ============================================================
+
+def convert_to_dataframe(value):
+
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+
+    if isinstance(value, pd.Series):
+        return value.to_frame()
+
+    if hasattr(value, "toarray"):
+        value = value.toarray()
+
+    array = np.asarray(value)
+
+    if array.ndim == 1:
+        array = array.reshape(1, -1)
+
+    return pd.DataFrame(array)
+
+
+def convert_to_numpy(value):
+
+    if isinstance(value, pd.DataFrame):
+        return value.to_numpy(dtype=float)
+
+    if hasattr(value, "toarray"):
+        value = value.toarray()
+
+    return np.asarray(
+        value,
+        dtype=float
+    )
+
+
+def check_models():
+
+    if model_load_error:
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Models are not loaded.",
+                "error": model_load_error,
+            },
+        )
+
+
+# ============================================================
+# FRONTEND
 # ============================================================
 
 @app.get("/")
 def root():
+
+    index_file = FRONTEND_DIR / "index.html"
+
+    if index_file.exists():
+        return FileResponse(index_file)
+
     return {
-        "message": "Universal Cyber Attack Detection System is running.",
         "status": "online",
-        "pipeline": [
-            "Dataset Adapter",
-            "Cleaning",
-            "Encoding",
-            "IALP",
-            "IFF",
-            "XGBoost",
-        ],
+        "message": "Universal Cyber Attack Detection API",
     }
 
 
+@app.get("/style.css")
+def style():
+
+    css_file = FRONTEND_DIR / "style.css"
+
+    if not css_file.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="style.css not found.",
+        )
+
+    return FileResponse(
+        css_file,
+        media_type="text/css",
+    )
+
+
+@app.get("/app.js")
+def javascript():
+
+    js_file = FRONTEND_DIR / "app.js"
+
+    if not js_file.exists():
+
+        raise HTTPException(
+            status_code=404,
+            detail="app.js not found.",
+        )
+
+    return FileResponse(
+        js_file,
+        media_type="application/javascript",
+    )
+
+
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.get("/health")
 def health():
+
     return {
-        "status": "healthy",
-        "ialp_loaded": ialp_model is not None,
-        "iff_loaded": iff_model is not None,
-        "xgboost_loaded": xgb_model is not None,
-        "encoder_loaded": encoder is not None,
+        "status": "healthy"
+        if (
+            ialp_model is not None
+            and iff_model is not None
+            and xgb_model is not None
+            and encoder is not None
+        )
+        else "degraded",
+
+        "ialp_loaded":
+            ialp_model is not None,
+
+        "iff_loaded":
+            iff_model is not None,
+
+        "xgboost_loaded":
+            xgb_model is not None,
+
+        "encoder_loaded":
+            encoder is not None,
+
+        "model_load_error":
+            model_load_error,
     }
 
 
 # ============================================================
-# INSPECT UPLOADED DATASET
+# INSPECT DATASET
 # ============================================================
 
 @app.post("/inspect-dataset")
-async def inspect_dataset(file: UploadFile = File(...)):
-    """
-    Inspect a cybersecurity CSV dataset.
-
-    This endpoint DOES NOT train the model.
-    It only checks the uploaded dataset.
-    """
-
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No filename was provided."
-        )
-
-    if not file.filename.lower().endswith(".csv"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only CSV files are supported."
-        )
+async def inspect_dataset(
+    file: UploadFile = File(...)
+):
 
     try:
-        file_bytes = await file.read()
 
-        if not file_bytes:
+        if not file.filename:
             raise HTTPException(
                 status_code=400,
-                detail="Uploaded CSV file is empty."
+                detail="No file selected.",
             )
 
-        dataframe = pd.read_csv(BytesIO(file_bytes))
+        if not file.filename.lower().endswith(".csv"):
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload a CSV file.",
+            )
 
-    except HTTPException:
-        raise
+        contents = await file.read()
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not read CSV file: {error}"
+        if not contents:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        dataframe = pd.read_csv(
+            BytesIO(contents)
         )
 
-    try:
-        information = get_dataset_info(dataframe)
+        if dataframe.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="CSV contains no records.",
+            )
 
-        compatible = is_kdd99_compatible(dataframe)
+        information = get_dataset_info(
+            dataframe
+        )
 
-        label_column = information.get("label_column")
+        compatible = is_kdd99_compatible(
+            dataframe
+        )
+
+        label_column = information.get(
+            "label_column"
+        )
 
         class_distribution = {}
 
-        if label_column and label_column in dataframe.columns:
-            distribution = (
+        if (
+            label_column
+            and
+            label_column in dataframe.columns
+        ):
+
+            counts = (
                 dataframe[label_column]
                 .astype(str)
                 .value_counts()
@@ -279,83 +353,81 @@ async def inspect_dataset(file: UploadFile = File(...)):
 
             class_distribution = {
                 str(key): int(value)
-                for key, value in distribution.items()
+                for key, value in counts.items()
             }
 
         return {
-            "filename": file.filename,
-            "dataset": information,
-            "compatible_with_current_model": bool(compatible),
-            "label_column": label_column,
-            "feature_count": len(dataframe.columns) - (
-                1 if label_column else 0
-            ),
-            "row_count": len(dataframe),
-            "columns": dataframe.columns.tolist(),
-            "class_distribution": class_distribution,
-            "message": (
-                "Dataset is compatible with the current "
-                "KDDCup99-trained model."
-                if compatible
-                else
-                "Dataset was detected, but it is not compatible "
-                "with the currently trained model."
-            ),
+
+            "success": True,
+
+            "filename":
+                file.filename,
+
+            "dataset":
+                information,
+
+            "compatible_with_current_model":
+                bool(compatible),
+
+            "label_column":
+                label_column,
+
+            "feature_count":
+                len(dataframe.columns)
+                -
+                (
+                    1
+                    if label_column
+                    else 0
+                ),
+
+            "row_count":
+                len(dataframe),
+
+            "columns":
+                dataframe.columns.tolist(),
+
+            "class_distribution":
+                class_distribution,
+
+            "message":
+                (
+                    "Dataset detected successfully."
+                ),
         }
 
+    except HTTPException:
+        raise
+
     except Exception as error:
+
+        print(
+            traceback.format_exc()
+        )
+
         raise HTTPException(
             status_code=400,
-            detail=f"Dataset inspection failed: {error}"
+            detail=f"Dataset inspection failed: {error}",
         )
 
 
 # ============================================================
-# PREDICTION
+# SINGLE RECORD PREDICTION
 # ============================================================
 
 @app.post("/predict")
-def predict(record: dict):
-    """
-    Predict whether a network record is Normal or an Attack.
+def predict(
+    record: dict
+):
 
-    Current trained model:
-    KDDCup99-compatible 41-feature input.
-    """
-
-    if encoder is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Encoder model is not loaded."
-        )
-
-    if ialp_model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="IALP model is not loaded."
-        )
-
-    if iff_model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="IFF model is not loaded."
-        )
-
-    if xgb_model is None:
-        raise HTTPException(
-            status_code=503,
-            detail="XGBoost model is not loaded."
-        )
+    check_models()
 
     if not isinstance(record, dict):
+
         raise HTTPException(
             status_code=400,
-            detail="Request body must be a JSON object."
+            detail="Request body must be a JSON object.",
         )
-
-    # --------------------------------------------------------
-    # CHECK REQUIRED FEATURES
-    # --------------------------------------------------------
 
     missing_features = [
         feature
@@ -364,23 +436,23 @@ def predict(record: dict):
     ]
 
     if missing_features:
+
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Required features are missing.",
-                "missing_features": missing_features,
-                "required_feature_count": len(KDD99_FEATURES),
-                "received_feature_count": len(record),
+                "message":
+                    "Required features are missing.",
+
+                "missing_features":
+                    missing_features,
             },
         )
 
-    # --------------------------------------------------------
-    # CREATE INPUT DATAFRAME
-    # --------------------------------------------------------
-
     try:
+
         input_data = {
-            feature: record[feature]
+            feature:
+                record.get(feature)
             for feature in KDD99_FEATURES
         }
 
@@ -390,13 +462,15 @@ def predict(record: dict):
         )
 
     except Exception as error:
+
         raise HTTPException(
             status_code=400,
-            detail=f"Could not create input record: {error}"
+            detail=f"Could not create input record: {error}",
         )
 
+
     # --------------------------------------------------------
-    # VALIDATE NUMERICAL FEATURES
+    # FEATURE TYPES
     # --------------------------------------------------------
 
     categorical_features = [
@@ -411,215 +485,410 @@ def predict(record: dict):
         if feature not in categorical_features
     ]
 
+
+    # --------------------------------------------------------
+    # FIX NUMERIC DATA
+    # --------------------------------------------------------
+
     invalid_numeric_features = []
 
     for feature in numeric_features:
-        value = pd.to_numeric(
-            input_df.at[0, feature],
-            errors="coerce",
+
+        input_df[feature] = pd.to_numeric(
+            input_df[feature],
+            errors="coerce"
         )
 
-        if pd.isna(value) or not np.isfinite(float(value)):
-            invalid_numeric_features.append(feature)
+        value = input_df[feature].iloc[0]
+
+        if (
+            pd.isna(value)
+            or
+            not np.isfinite(float(value))
+        ):
+
+            invalid_numeric_features.append(
+                feature
+            )
+
         else:
-            input_df.at[0, feature] = float(value)
+
+            input_df[feature] = (
+                input_df[feature]
+                .astype(float)
+            )
+
 
     if invalid_numeric_features:
+
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Invalid numerical values found.",
-                "invalid_features": invalid_numeric_features,
+                "message":
+                    "Invalid numerical values found.",
+
+                "invalid_features":
+                    invalid_numeric_features,
             },
         )
 
+
     # --------------------------------------------------------
-    # CLEAN CATEGORICAL VALUES
+    # CATEGORICAL DATA
     # --------------------------------------------------------
 
     for feature in categorical_features:
-        value = input_df.at[0, feature]
+
+        value = input_df[feature].iloc[0]
 
         if pd.isna(value):
-            input_df.at[0, feature] = "Unknown"
-        else:
-            input_df.at[0, feature] = str(value)
 
-    print()
-    print("Prediction request received")
-    print("Input shape:", input_df.shape)
+            input_df[feature] = "Unknown"
+
+        else:
+
+            input_df[feature] = (
+                input_df[feature]
+                .astype(str)
+            )
+
 
     # --------------------------------------------------------
-    # ENCODING
+    # ENCODER
     # --------------------------------------------------------
 
     try:
-        encoded = encoder.transform(input_df)
-        encoded_df = convert_to_dataframe(encoded)
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Encoding failed: {error}"
+        encoded = encoder.transform(
+            input_df
         )
 
-    print("Encoded shape:", encoded_df.shape)
+        encoded_df = convert_to_dataframe(
+            encoded
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"Encoding failed: {error}",
+        )
+
 
     # --------------------------------------------------------
     # IALP
     # --------------------------------------------------------
 
     try:
-        ialp_output = ialp_model.transform(encoded_df)
-        ialp_df = convert_to_dataframe(ialp_output)
-        ialp_array = convert_to_numpy(ialp_df)
 
-    except Exception as error:
-        raise HTTPException(
-            status_code=500,
-            detail=f"IALP processing failed: {error}"
+        ialp_output = ialp_model.transform(
+            encoded_df
         )
 
-    print("IALP output shape:", ialp_df.shape)
+        ialp_df = convert_to_dataframe(
+            ialp_output
+        )
+
+        ialp_array = convert_to_numpy(
+            ialp_df
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"IALP processing failed: {error}",
+        )
+
 
     # --------------------------------------------------------
-    # IFF / ISOLATION FOREST
+    # IFF
     # --------------------------------------------------------
 
     try:
+
+        iff_prediction_array = np.asarray(
+            iff_model.predict(
+                ialp_array
+            )
+        ).reshape(-1)
+
         iff_prediction = int(
-            iff_model.predict(ialp_array)[0]
+            iff_prediction_array[0]
         )
 
-        iff_score = float(
-            iff_model.score_samples(ialp_array)[0]
-        )
+        if hasattr(
+            iff_model,
+            "score_samples"
+        ):
 
-        iff_anomaly = iff_prediction == -1
+            iff_score = float(
+                np.asarray(
+                    iff_model.score_samples(
+                        ialp_array
+                    )
+                )
+                .reshape(-1)[0]
+            )
+
+        else:
+
+            iff_score = 0.0
+
+        iff_anomaly = (
+            iff_prediction == -1
+        )
 
     except Exception as error:
+
         raise HTTPException(
             status_code=500,
-            detail=f"IFF processing failed: {error}"
+            detail=f"IFF processing failed: {error}",
         )
 
+
     # --------------------------------------------------------
-    # FINAL FEATURE REPRESENTATION
+    # FINAL FEATURES
     # --------------------------------------------------------
 
     try:
-        final_features = np.column_stack(
+
+        iff_column = np.asarray(
+            [iff_prediction],
+            dtype=float
+        ).reshape(-1, 1)
+
+        score_column = np.asarray(
+            [iff_score],
+            dtype=float
+        ).reshape(-1, 1)
+
+        final_features = np.hstack(
             [
                 ialp_array,
-                [iff_prediction],
-                [iff_score],
+                iff_column,
+                score_column,
             ]
         )
 
     except Exception as error:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Feature construction failed: {error}"
+            detail=f"Feature construction failed: {error}",
         )
 
-    print(
-        "Final XGBoost shape:",
-        final_features.shape
-    )
 
     # --------------------------------------------------------
-    # XGBOOST PREDICTION
+    # XGBOOST
     # --------------------------------------------------------
 
     try:
-        results = xgb_model.predict_with_confidence(
-            final_features
-        )
 
-        if not results:
-            raise ValueError(
-                "XGBoost returned no prediction."
+        prediction = "Unknown"
+        confidence = 0.0
+
+        if hasattr(
+            xgb_model,
+            "predict_with_confidence"
+        ):
+
+            results = (
+                xgb_model
+                .predict_with_confidence(
+                    final_features
+                )
             )
 
-        result = results[0]
+            if results:
 
-        prediction = str(result["label"])
-        confidence = float(result["confidence"])
+                result = results[0]
+
+                prediction = str(
+                    result.get(
+                        "label",
+                        result.get(
+                            "prediction",
+                            "Unknown"
+                        )
+                    )
+                )
+
+                confidence = float(
+                    result.get(
+                        "confidence",
+                        0.0
+                    )
+                )
+
+        else:
+
+            raw_prediction = (
+                xgb_model.predict(
+                    final_features
+                )
+            )
+
+            if len(raw_prediction) > 0:
+
+                prediction = str(
+                    raw_prediction[0]
+                )
+
+            if hasattr(
+                xgb_model,
+                "predict_proba"
+            ):
+
+                probabilities = (
+                    xgb_model.predict_proba(
+                        final_features
+                    )
+                )
+
+                confidence = (
+                    float(
+                        np.max(
+                            probabilities[0]
+                        )
+                    )
+                    * 100
+                )
 
     except Exception as error:
+
         raise HTTPException(
             status_code=500,
-            detail=f"XGBoost prediction failed: {error}"
+            detail=f"XGBoost prediction failed: {error}",
         )
 
+
     # --------------------------------------------------------
-    # STATUS
+    # CONFIDENCE
     # --------------------------------------------------------
 
-    if prediction.lower() == "normal":
-        detection_status = "Benign Traffic"
+    if 0 <= confidence <= 1:
+        confidence *= 100
+
+    confidence = max(
+        0.0,
+        min(
+            100.0,
+            confidence
+        )
+    )
+
+
+    # --------------------------------------------------------
+    # FINAL RESULT
+    # --------------------------------------------------------
+
+    prediction_lower = (
+        prediction
+        .strip()
+        .lower()
+    )
+
+    if prediction_lower in [
+        "normal",
+        "benign",
+        "normal traffic",
+    ]:
+
         prediction_display = "NORMAL"
+
+        detection_status = (
+            "Normal Traffic"
+        )
+
     else:
-        detection_status = "Malicious Traffic"
+
         prediction_display = "ATTACK"
 
-    # --------------------------------------------------------
-    # RESPONSE
-    # --------------------------------------------------------
+        detection_status = (
+            "Malicious Traffic"
+        )
 
-    response = {
-        "prediction": prediction_display,
-        "attack_type": prediction,
-        "confidence": confidence,
-        "detection_status": detection_status,
-        "iff_anomaly": bool(iff_anomaly),
-        "iff_score": iff_score,
-        "dataset_type": "KDDCup99-compatible",
+
+    return {
+
+        "success":
+            True,
+
+        "prediction":
+            prediction_display,
+
+        "attack_type":
+            prediction,
+
+        "confidence":
+            round(
+                confidence,
+                2
+            ),
+
+        "detection_status":
+            detection_status,
+
+        "iff_anomaly":
+            bool(
+                iff_anomaly
+            ),
+
+        "iff_score":
+            round(
+                iff_score,
+                6
+            ),
+
+        "dataset_type":
+            "KDDCup99-compatible",
     }
-
-    print()
-    print("Prediction:", prediction_display)
-    print("Attack Type:", prediction)
-    print("Confidence:", confidence)
-    print("IFF Anomaly:", iff_anomaly)
-    print()
-
-    return response
 
 
 # ============================================================
-# DATASET INFORMATION
+# DATASET INFO
 # ============================================================
 
 @app.get("/dataset-info")
 def dataset_info():
-    """
-    Return information about the currently available
-    training dataset.
-    """
 
-    if not DEFAULT_DATASET_PATH.exists():
+    csv_files = list(
+        DATASET_DIR.glob("*.csv")
+    )
+
+    if not csv_files:
+
         raise HTTPException(
             status_code=404,
-            detail=(
-                f"Dataset not found: "
-                f"{DEFAULT_DATASET_PATH}"
-            ),
+            detail="No CSV dataset found.",
         )
+
+    dataset_file = csv_files[0]
 
     try:
+
         dataframe = pd.read_csv(
-            DEFAULT_DATASET_PATH
+            dataset_file
         )
 
-        information = get_dataset_info(dataframe)
+        information = get_dataset_info(
+            dataframe
+        )
 
-        label_column = information.get("label_column")
+        label_column = information.get(
+            "label_column"
+        )
 
         class_distribution = {}
 
-        if label_column and label_column in dataframe.columns:
-            distribution = (
+        if (
+            label_column
+            and
+            label_column in dataframe.columns
+        ):
+
+            counts = (
                 dataframe[label_column]
                 .astype(str)
                 .value_counts()
@@ -628,73 +897,400 @@ def dataset_info():
 
             class_distribution = {
                 str(key): int(value)
-                for key, value in distribution.items()
+                for key, value in counts.items()
             }
 
         return {
-            "filename": DEFAULT_DATASET_PATH.name,
-            "dataset_path": str(DEFAULT_DATASET_PATH),
-            "dataset": information,
-            "compatible_with_current_model": bool(
-                is_kdd99_compatible(dataframe)
-            ),
-            "class_distribution": class_distribution,
+
+            "success":
+                True,
+
+            "filename":
+                dataset_file.name,
+
+            "dataset":
+                information,
+
+            "compatible_with_current_model":
+                bool(
+                    is_kdd99_compatible(
+                        dataframe
+                    )
+                ),
+
+            "class_distribution":
+                class_distribution,
         }
 
     except Exception as error:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Could not load dataset information: {error}"
+            detail=f"Could not load dataset information: {error}",
         )
 
 
 # ============================================================
-# FULL MODEL ANALYSIS
+# MODEL ANALYSIS
 # ============================================================
 
 @app.get("/analyze")
 def analyze():
-    """
-    Return the current model analysis.
-    """
+
+    if run_full_analysis is None:
+
+        return {
+            "success": False,
+            "message":
+                "Complete analysis module is not available.",
+            "comparison": [],
+        }
 
     try:
-        result = run_full_analysis()
-        return result
+
+        return run_full_analysis()
 
     except Exception as error:
+
+        print(
+            traceback.format_exc()
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"Model analysis failed: {error}"
+            detail=f"Model analysis failed: {error}",
         )
 
 
 # ============================================================
-# REFRESH MODEL ANALYSIS
+# UPLOADED DATASET ANALYSIS
 # ============================================================
 
-@app.post("/analyze/refresh")
-def refresh_analysis():
-    """
-    Re-run model analysis.
-    """
+@app.post("/analyze-upload")
+async def analyze_uploaded_dataset(
+    file: UploadFile = File(...)
+):
 
     try:
-        result = run_full_analysis()
-        return result
+
+        if not file.filename:
+
+            raise HTTPException(
+                status_code=400,
+                detail="No file was selected.",
+            )
+
+        if not file.filename.lower().endswith(".csv"):
+
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload a CSV file.",
+            )
+
+        contents = await file.read()
+
+        if not contents:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        dataframe = pd.read_csv(
+            BytesIO(contents)
+        )
+
+        if dataframe.empty:
+
+            raise HTTPException(
+                status_code=400,
+                detail="CSV contains no records.",
+            )
+
+
+        print()
+        print("=" * 60)
+        print("UPLOADED DATASET ANALYSIS")
+        print("=" * 60)
+        print("File:", file.filename)
+        print("Rows:", len(dataframe))
+        print("Columns:", len(dataframe.columns))
+        print("=" * 60)
+
+
+        information = get_dataset_info(
+            dataframe
+        )
+
+        compatible = is_kdd99_compatible(
+            dataframe
+        )
+
+        label_column = information.get(
+            "label_column"
+        )
+
+        class_distribution = {}
+
+        if (
+            label_column
+            and
+            label_column in dataframe.columns
+        ):
+
+            counts = (
+                dataframe[label_column]
+                .astype(str)
+                .value_counts()
+                .to_dict()
+            )
+
+            class_distribution = {
+                str(key): int(value)
+                for key, value in counts.items()
+            }
+
+
+        # ----------------------------------------------------
+        # BENCHMARK
+        # ----------------------------------------------------
+
+        benchmark = run_dataset_benchmark(
+            dataframe
+        )
+
+
+        comparison = benchmark.get(
+            "comparison",
+            []
+        )
+
+
+        metrics = {}
+
+        if comparison:
+
+            proposed = None
+
+            for item in comparison:
+
+                name = str(
+                    item.get(
+                        "model",
+                        item.get(
+                            "name",
+                            ""
+                        )
+                    )
+                ).lower()
+
+                if (
+                    "ialp" in name
+                    or
+                    "proposed" in name
+                ):
+
+                    proposed = item
+                    break
+
+            if proposed is None:
+                proposed = comparison[-1]
+
+            metrics = {
+                "accuracy":
+                    proposed.get(
+                        "accuracy",
+                        0
+                    ),
+
+                "precision":
+                    proposed.get(
+                        "precision",
+                        proposed.get(
+                            "macro_precision",
+                            0
+                        )
+                    ),
+
+                "recall":
+                    proposed.get(
+                        "recall",
+                        proposed.get(
+                            "macro_recall",
+                            0
+                        )
+                    ),
+
+                "f1":
+                    proposed.get(
+                        "f1",
+                        proposed.get(
+                            "macro_f1",
+                            0
+                        )
+                    ),
+
+                "macro_precision":
+                    proposed.get(
+                        "macro_precision",
+                        proposed.get(
+                            "precision",
+                            0
+                        )
+                    ),
+
+                "macro_recall":
+                    proposed.get(
+                        "macro_recall",
+                        proposed.get(
+                            "recall",
+                            0
+                        )
+                    ),
+
+                "macro_f1":
+                    proposed.get(
+                        "macro_f1",
+                        proposed.get(
+                            "f1",
+                            0
+                        )
+                    ),
+
+                "weighted_f1":
+                    proposed.get(
+                        "weighted_f1",
+                        0
+                    ),
+            }
+
+
+        return {
+
+            "success":
+                True,
+
+            "filename":
+                file.filename,
+
+            "dataset": {
+
+                "filename":
+                    file.filename,
+
+                "rows":
+                    len(dataframe),
+
+                "records":
+                    len(dataframe),
+
+                "columns":
+                    len(dataframe.columns),
+
+                "features":
+                    (
+                        len(dataframe.columns)
+                        -
+                        (
+                            1
+                            if label_column
+                            else 0
+                        )
+                    ),
+
+                "feature_count":
+                    (
+                        len(dataframe.columns)
+                        -
+                        (
+                            1
+                            if label_column
+                            else 0
+                        )
+                    ),
+
+                "classes":
+                    len(
+                        class_distribution
+                    ),
+
+                "class_count":
+                    len(
+                        class_distribution
+                    ),
+
+                "class_names":
+                    list(
+                        class_distribution.keys()
+                    ),
+            },
+
+            "compatible_with_current_model":
+                bool(compatible),
+
+            "label_column":
+                label_column,
+
+            "class_distribution":
+                class_distribution,
+
+            "metrics":
+                metrics,
+
+            "comparison":
+                comparison,
+
+            "model_comparison":
+                comparison,
+
+            "benchmark":
+                benchmark,
+
+            "confusion_matrix":
+                benchmark.get(
+                    "confusion_matrix",
+                    {}
+                ),
+
+            "roc":
+                benchmark.get(
+                    "roc",
+                    []
+                ),
+
+            "message":
+                "Dataset evaluation completed successfully.",
+        }
+
+
+    except HTTPException:
+        raise
 
     except Exception as error:
+
+        print()
+        print("UPLOADED DATASET ANALYSIS ERROR")
+        print(error)
+        print(traceback.format_exc())
+
         raise HTTPException(
             status_code=500,
-            detail=f"Analysis refresh failed: {error}"
+            detail={
+                "message":
+                    "Uploaded dataset analysis failed.",
+
+                "error":
+                    str(error),
+            },
         )
 
 
 # ============================================================
-# RUN DIRECTLY
+# RUN
 # ============================================================
 
 if __name__ == "__main__":
+
     import uvicorn
 
     uvicorn.run(

@@ -9,726 +9,436 @@
 
     <link rel="stylesheet" href="style.css">
 
+    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
 
+<div class="container">
+
     <!-- ================= HEADER ================= -->
 
-    <header class="topbar">
+    <header class="header">
 
-        <div class="brand">
-
-            <div class="brand-icon">
-                🛡
-            </div>
-
-            <div>
-                <h1>CYBER ATTACK DETECTION</h1>
-                <p>Universal Network Security Intelligence</p>
-            </div>
-
+        <div>
+            <h1>CYBER ATTACK DETECTION SYSTEM</h1>
+            <p>Universal Cyber Detection • IALP • IFF • XGBoost</p>
         </div>
 
-        <div class="model-tag">
-            IALP <span>+</span> IFF <span>+</span> XGBoost
-        </div>
-
-        <div class="backend">
-            <span id="backend-indicator"></span>
-            <span id="backend-status">
-                Checking backend...
-            </span>
+        <div class="backend-box">
+            <span id="backend-indicator" class="status-indicator checking"></span>
+            <span id="backend-status">Checking...</span>
         </div>
 
     </header>
 
 
-    <!-- ================= MAIN ================= -->
+    <!-- ================= DATASET UPLOAD ================= -->
 
-    <main class="dashboard">
+    <section class="card upload-card">
 
+        <h2>Dataset Upload</h2>
 
-        <!-- ================= DATASET ================= -->
+        <p class="section-description">
+            Upload a CSV network traffic dataset for cyber attack detection
+            and machine learning evaluation.
+        </p>
 
-        <section class="panel">
+        <div class="upload-area">
 
-            <div class="panel-title">
+            <label for="file-input" class="upload-label">
+                SELECT CSV DATASET
+            </label>
 
-                <div>
-                    <span class="section-label">
-                        01 / INPUT
-                    </span>
-
-                    <h2>Dataset</h2>
-
-                    <p class="panel-description">
-                        Upload a cybersecurity CSV dataset
-                        compatible with the current detection model.
-                    </p>
-                </div>
-
-                <span class="panel-status">
-                    DATA SOURCE
-                </span>
-
-            </div>
-
-
-            <div class="dataset-layout">
-
-
-                <!-- Upload -->
-
-                <div class="upload-area">
-
-                    <div class="upload-symbol">
-                        ↑
-                    </div>
-
-                    <h3>
-                        Upload Network Dataset
-                    </h3>
-
-                    <p>
-                        Select a CSV containing network traffic
-                        features.
-                    </p>
-
-                    <label
-                        for="file-input"
-                        class="button button-outline"
-                    >
-                        CHOOSE CSV
-                    </label>
-
-                    <input
-                        id="file-input"
-                        type="file"
-                        accept=".csv,text/csv"
-                        hidden
-                    >
-
-                    <div
-                        id="file-status"
-                        class="file-status"
-                    >
-                        No dataset selected
-                    </div>
-
-                </div>
-
-
-                <!-- Dataset Details -->
-
-                <div class="dataset-details">
-
-                    <div
-                        id="dataset-compatibility"
-                        class="compatibility"
-                    >
-                        <span>●</span>
-
-                        <span class="compatibility-text">
-                            Waiting for dataset
-                        </span>
-                    </div>
-
-
-                    <div class="stats-grid">
-
-                        <div class="stat">
-
-                            <span>DATASET</span>
-
-                            <strong id="datasetName">
-                                —
-                            </strong>
-
-                        </div>
-
-
-                        <div class="stat">
-
-                            <span>RECORDS</span>
-
-                            <strong id="recordCount">
-                                —
-                            </strong>
-
-                        </div>
-
-
-                        <div class="stat">
-
-                            <span>FEATURES</span>
-
-                            <strong id="featureCount">
-                                —
-                            </strong>
-
-                        </div>
-
-
-                        <div class="stat">
-
-                            <span>CLASSES</span>
-
-                            <strong id="classCount">
-                                —
-                            </strong>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ================= DETECTION ================= -->
-
-        <section
-            id="detection-section"
-            class="panel hidden"
-        >
-
-            <div class="panel-title">
-
-                <div>
-                    <span class="section-label">
-                        02 / ANALYSIS
-                    </span>
-
-                    <h2>Attack Detection</h2>
-
-                    <p class="panel-description">
-                        Analyze a selected network traffic record.
-                    </p>
-                </div>
-
-                <span class="live-tag">
-                    ● LIVE ENGINE
-                </span>
-
-            </div>
-
-
-            <!-- Controls -->
-
-            <div class="detection-controls">
-
-                <div class="record-input">
-
-                    <label for="record-number">
-                        RECORD NUMBER
-                    </label>
-
-                    <input
-                        id="record-number"
-                        type="number"
-                        min="1"
-                        value="1"
-                    >
-
-                </div>
-
-
-                <button
-                    id="detect-button"
-                    class="button button-primary"
-                    type="button"
-                >
-                    DETECT ATTACK
-                    <span>→</span>
-                </button>
-
-            </div>
-
-
-            <!-- Detection Result -->
-
-            <div class="result-panel">
-
-
-                <div class="result-main">
-
-                    <span class="result-caption">
-                        CURRENT PREDICTION
-                    </span>
-
-                    <div
-                        id="prediction"
-                        class="prediction"
-                    >
-                        —
-                    </div>
-
-                    <div
-                        id="detectionStatus"
-                        class="detection-status"
-                    >
-                        Waiting for analysis
-                    </div>
-
-                </div>
-
-
-                <!-- Confidence -->
-
-                <div class="confidence-box">
-
-                    <span class="result-caption">
-                        CONFIDENCE
-                    </span>
-
-                    <strong id="confidence">
-                        —
-                    </strong>
-
-                    <div class="confidence-track">
-
-                        <div
-                            id="confidence-bar"
-                            class="confidence-fill"
-                        ></div>
-
-                    </div>
-
-                    <span id="confidence-value">
-                        —
-                    </span>
-
-                </div>
-
-            </div>
-
-
-            <!-- Extra Detection Information -->
-
-            <div class="result-details">
-
-                <div class="detail-card">
-
-                    <span>
-                        ATTACK TYPE
-                    </span>
-
-                    <strong id="attackType">
-                        —
-                    </strong>
-
-                </div>
-
-
-                <div class="detail-card">
-
-                    <span>
-                        IFF ANOMALY
-                    </span>
-
-                    <strong id="iffAnomaly">
-                        —
-                    </strong>
-
-                </div>
-
-
-                <div class="detail-card">
-
-                    <span>
-                        IFF SCORE
-                    </span>
-
-                    <strong id="iffScore">
-                        —
-                    </strong>
-
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ================= PIPELINE ================= -->
-
-        <section class="panel">
-
-            <div class="panel-title">
-
-                <div>
-                    <span class="section-label">
-                        03 / ENGINE
-                    </span>
-
-                    <h2>Detection Pipeline</h2>
-                </div>
-
-            </div>
-
-
-            <div class="pipeline">
-
-                <div class="pipeline-node">
-                    <span>01</span>
-                    <strong>Dataset</strong>
-                    <small>Network traffic</small>
-                </div>
-
-                <div class="pipeline-line"></div>
-
-                <div class="pipeline-node">
-                    <span>02</span>
-                    <strong>Cleaning</strong>
-                    <small>Data preparation</small>
-                </div>
-
-                <div class="pipeline-line"></div>
-
-                <div class="pipeline-node">
-                    <span>03</span>
-                    <strong>Encoding</strong>
-                    <small>Feature encoding</small>
-                </div>
-
-                <div class="pipeline-line"></div>
-
-                <div class="pipeline-node active">
-                    <span>04</span>
-                    <strong>IALP</strong>
-                    <small>Adaptive processing</small>
-                </div>
-
-                <div class="pipeline-line"></div>
-
-                <div class="pipeline-node active">
-                    <span>05</span>
-                    <strong>IFF</strong>
-                    <small>Anomaly detection</small>
-                </div>
-
-                <div class="pipeline-line"></div>
-
-                <div class="pipeline-node active">
-                    <span>06</span>
-                    <strong>XGBoost</strong>
-                    <small>Classification</small>
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ================= EVALUATION ================= -->
-
-        <section
-            id="evaluation-section"
-            class="panel hidden"
-        >
-
-            <div class="panel-title">
-
-                <div>
-
-                    <span class="section-label">
-                        04 / PERFORMANCE
-                    </span>
-
-                    <h2>Model Evaluation</h2>
-
-                    <p class="panel-description">
-                        Evaluation of the currently trained model
-                        on its KDDCup99-derived hold-out test split.
-                    </p>
-
-                </div>
-
-
-                <button
-                    id="evaluate-button"
-                    class="button button-outline"
-                    type="button"
-                >
-                    EVALUATE MODEL
-                </button>
-
-            </div>
-
-
-            <!-- Metrics -->
-
-            <div class="metrics">
-
-                <div class="metric">
-
-                    <span>
-                        ACCURACY
-                    </span>
-
-                    <strong id="accuracy">
-                        —
-                    </strong>
-
-                </div>
-
-
-                <div class="metric">
-
-                    <span>
-                        MACRO PRECISION
-                    </span>
-
-                    <strong id="macroPrecision">
-                        —
-                    </strong>
-
-                </div>
-
-
-                <div class="metric">
-
-                    <span>
-                        MACRO RECALL
-                    </span>
-
-                    <strong id="macroRecall">
-                        —
-                    </strong>
-
-                </div>
-
-
-                <div class="metric">
-
-                    <span>
-                        MACRO F1
-                    </span>
-
-                    <strong id="macroF1">
-                        —
-                    </strong>
-
-                </div>
-
-            </div>
-
-
-            <!-- Evaluation Confusion Matrix -->
-
-            <div class="analysis-area">
-
-                <div class="analysis-heading">
-                    CONFUSION MATRIX
-                </div>
-
-                <div
-                    id="evaluation-confusion-matrix"
-                    class="confusion-matrix"
-                >
-                    —
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- ================= COMPLETE ANALYSIS ================= -->
-
-        <section
-            id="analysis-section"
-            class="panel hidden"
-        >
-
-            <div class="panel-title">
-
-                <div>
-
-                    <span class="section-label">
-                        05 / REPORT
-                    </span>
-
-                    <h2>Complete Analysis</h2>
-
-                    <p class="panel-description">
-                        Detailed performance analysis of the
-                        IALP + IFF + XGBoost detection pipeline.
-                    </p>
-
-                </div>
-
-
-                <button
-                    id="analysis-button"
-                    class="button button-primary"
-                    type="button"
-                >
-                    RUN COMPLETE ANALYSIS
-                    <span>→</span>
-                </button>
-
-            </div>
-
-
-            <!-- Model Comparison -->
-
-            <div class="analysis-area">
-
-                <div class="analysis-heading">
-                    MODEL COMPARISON
-                </div>
-
-                <div class="table-container">
-
-                    <table>
-
-                        <thead>
-
-                            <tr>
-                                <th>Algorithm</th>
-                                <th>Accuracy</th>
-                                <th>Precision</th>
-                                <th>Recall</th>
-                                <th>F1</th>
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="comparison-body">
-
-                            <tr>
-                                <td colspan="5">
-                                    Run complete analysis to view results.
-                                </td>
-                            </tr>
-
-                        </tbody>
-
-                    </table>
-
-                </div>
-
-            </div>
-
-
-            <!-- Class Performance -->
-
-            <div
-                id="class-section"
-                class="analysis-area"
+            <input
+                type="file"
+                id="file-input"
+                accept=".csv,text/csv"
             >
 
-                <div class="analysis-heading">
-                    CLASS PERFORMANCE
-                </div>
-
-                <div class="table-container">
-
-                    <table>
-
-                        <thead>
-
-                            <tr>
-                                <th>Class</th>
-                                <th>Precision</th>
-                                <th>Recall</th>
-                                <th>F1</th>
-                                <th>Support</th>
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="class-performance-body">
-
-                            <tr>
-                                <td colspan="5">
-                                    Run complete analysis to view results.
-                                </td>
-                            </tr>
-
-                        </tbody>
-
-                    </table>
-
-                </div>
-
+            <div id="file-status" class="file-status">
+                No dataset selected
             </div>
 
+        </div>
 
-            <!-- Advanced Analysis -->
+    </section>
 
-            <div
-                id="advanced-section"
-                class="analysis-area"
-            >
 
-                <div class="analysis-heading">
-                    ADVANCED CONFUSION MATRIX
-                </div>
+    <!-- ================= DATASET INFORMATION ================= -->
 
+    <section class="card">
+
+        <h2>Dataset Information</h2>
+
+        <div class="info-grid">
+
+            <div class="info-box">
+                <span>Dataset</span>
+                <strong id="datasetName">—</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Records</span>
+                <strong id="recordCount">—</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Features</span>
+                <strong id="featureCount">—</strong>
+            </div>
+
+            <div class="info-box">
+                <span>Classes</span>
+                <strong id="classCount">—</strong>
+            </div>
+
+        </div>
+
+        <div
+            id="dataset-compatibility"
+            class="compatibility"
+        ></div>
+
+    </section>
+
+
+    <!-- ================= DETECTION MODELS ================= -->
+
+    <section class="card">
+
+        <h2>Detection Models</h2>
+
+        <div class="model-grid">
+
+            <div class="model-box">
+                <h3>IALP</h3>
+                <p>Loaded</p>
+            </div>
+
+            <div class="model-box">
+                <h3>IFF</h3>
+                <p>Loaded</p>
+            </div>
+
+            <div class="model-box">
+                <h3>XGBoost</h3>
+                <p>Loaded</p>
+            </div>
+
+            <div class="model-box">
+                <h3>Encoder</h3>
+                <p>Loaded</p>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- ================= DATASET ANALYSIS ================= -->
+
+    <section class="card">
+
+        <h2>Dataset Analysis</h2>
+
+        <p class="section-description">
+            Run detection, evaluation, and complete machine learning analysis
+            on the uploaded dataset.
+        </p>
+
+        <div class="button-row">
+
+           <button
+    type="button"
+    id="detect-button"
+    class="btn btn-primary"
+    disabled
+>
+    DETECT ATTACK
+</button>
+
+<button
+    type="button"
+    id="evaluate-button"
+    class="btn btn-secondary"
+    disabled
+>
+    EVALUATE DATASET
+</button>
+
+<button
+    type="button"
+    id="analysis-button"
+    class="btn btn-danger"
+    disabled
+>
+    RUN COMPLETE ANALYSIS
+</button>
+
+        </div>
+
+    </section>
+
+
+    <!-- ================= DETECTION SECTION ================= -->
+
+    <section
+        class="card hidden"
+        id="detection-section"
+    >
+
+        <h2>Detection Result</h2>
+
+        <div class="result-grid">
+
+            <div class="result-box">
+                <span>Prediction</span>
+                <strong id="prediction">—</strong>
+            </div>
+
+            <div class="result-box">
+                <span>Attack Type</span>
+                <strong id="attackType">—</strong>
+            </div>
+
+            <div class="result-box">
+                <span>Confidence</span>
+                <strong id="confidence">—</strong>
+            </div>
+
+            <div class="result-box">
+                <span>Detection Status</span>
+                <strong id="detectionStatus">—</strong>
+            </div>
+
+            <div class="result-box">
+                <span>IFF Anomaly</span>
+                <strong id="iffAnomaly">—</strong>
+            </div>
+
+            <div class="result-box">
+                <span>IFF Score</span>
+                <strong id="iffScore">—</strong>
+            </div>
+
+        </div>
+
+        <div class="confidence-container">
+
+            <div class="confidence-title">
+                Confidence
+            </div>
+
+            <div class="confidence-track">
                 <div
-                    id="advanced-confusion-matrix"
-                    class="confusion-matrix"
-                >
-                    —
-                </div>
-
+                    id="confidence-bar"
+                    class="confidence-bar"
+                    style="width:0%"
+                ></div>
             </div>
 
+        </div>
 
-            <!-- ROC -->
+    </section>
 
-            <div class="analysis-area chart-area">
 
-                <div class="analysis-heading">
-                    MULTI-CLASS ROC CURVE
-                </div>
+    <!-- ================= EVALUATION SECTION ================= -->
 
-                <div class="roc-wrapper">
+    <section
+        class="card hidden"
+        id="evaluation-section"
+    >
 
-                    <canvas id="roc-chart"></canvas>
+        <h2>Evaluation Metrics</h2>
 
-                </div>
+        <div class="metrics-grid">
 
+            <div class="metric-box">
+                <span>Accuracy</span>
+                <strong id="accuracy">—</strong>
             </div>
 
-        </section>
+            <div class="metric-box">
+                <span>Macro Precision</span>
+                <strong id="macroPrecision">—</strong>
+            </div>
 
-    </main>
+            <div class="metric-box">
+                <span>Macro Recall</span>
+                <strong id="macroRecall">—</strong>
+            </div>
+
+            <div class="metric-box">
+                <span>Macro F1</span>
+                <strong id="macroF1">—</strong>
+            </div>
+
+            <div class="metric-box">
+                <span>Weighted F1</span>
+                <strong id="weightedF1">—</strong>
+            </div>
+
+        </div>
+
+        <h3>Confusion Matrix</h3>
+
+        <div
+            id="evaluation-confusion-matrix"
+            class="table-container"
+        >
+            No evaluation performed yet.
+        </div>
+
+    </section>
+
+
+    <!-- ================= COMPLETE ANALYSIS ================= -->
+
+    <section
+        class="card hidden"
+        id="analysis-section"
+    >
+
+        <h2>Complete Analysis</h2>
+
+        <!-- MODEL COMPARISON -->
+
+        <h3>Model Comparison</h3>
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Algorithm</th>
+                        <th>Accuracy</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>F1 Score</th>
+                        <th>Training Time</th>
+                    </tr>
+
+                </thead>
+
+                <tbody id="comparison-body">
+
+                    <tr>
+                        <td colspan="6">
+                            No comparison data available.
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+
+        <!-- CLASS PERFORMANCE -->
+
+        <h3>Class Performance</h3>
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Class</th>
+                        <th>Precision</th>
+                        <th>Recall</th>
+                        <th>F1 Score</th>
+                        <th>Support</th>
+                    </tr>
+
+                </thead>
+
+                <tbody id="class-performance-body">
+
+                    <tr>
+                        <td colspan="5">
+                            No class performance data available.
+                        </td>
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+
+        <!-- CONFUSION MATRIX -->
+
+        <h3>Confusion Matrix</h3>
+
+        <div
+            id="advanced-confusion-matrix"
+            class="table-container"
+        >
+            No confusion matrix available.
+        </div>
+
+
+        <!-- ROC -->
+
+        <h3>ROC Curve</h3>
+
+        <div class="chart-container">
+
+            <canvas id="roc-chart"></canvas>
+
+            <p id="roc-message">
+                ROC data will appear when available.
+            </p>
+
+        </div>
+
+    </section>
+
+
+    <!-- ================= ACTIVITY LOG ================= -->
+
+    <section class="card">
+
+        <h2>System Activity</h2>
+
+        <div
+            id="activity-log"
+            class="activity-log"
+        >
+            <div class="log-line">
+                SYSTEM: Waiting for dataset upload.
+            </div>
+        </div>
+
+    </section>
 
 
     <!-- ================= FOOTER ================= -->
 
     <footer>
 
-        <div>
+        <p>
+            Universal Cyber Attack Detection System
+        </p>
 
-            <strong>
-                UNIVERSAL CYBER ATTACK DETECTION SYSTEM
-            </strong>
-
-            <span>
-                Defensive cybersecurity detection &
-                classification
-            </span>
-
-        </div>
-
-        <div class="footer-model">
+        <p>
             IALP • IFF • XGBoost
-        </div>
+        </p>
 
     </footer>
 
+</div>
 
-    <script src="app.js"></script>
+
+<script src="app.js"></script>
 
 </body>
-
 </html>

@@ -1,40 +1,42 @@
 "use strict";
 
-/*
-============================================================
- UNIVERSAL CYBER ATTACK DETECTION SYSTEM
- IALP + IFF + XGBoost
-============================================================
- Frontend:
- 1. Upload CSV
- 2. Read CSV
- 3. Check compatibility
- 4. Display dataset information
- 5. Detect attack
- 6. Evaluate trained model
- 7. Run complete analysis
-============================================================
-*/
-
 const API_URL = "http://127.0.0.1:8000";
 
 let selectedFile = null;
-let csvRows = [];
 let csvHeaders = [];
+let csvRows = [];
 let rocChart = null;
+let lastAnalysis = null;
+
+/* Prevent accidental form submission */
+document.addEventListener(
+    "submit",
+    function (event) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+    },
+    true
+);
+
+console.log("========================================");
+console.log("UNIVERSAL CYBER DETECTION SYSTEM");
+console.log("NEW FIXED APP.JS LOADED");
+console.log("========================================");
 
 
-/* ============================================================
-   REQUIRED KDDCup99 FEATURES
-============================================================ */
+/* =========================================================
+   KDD CUP 99 FEATURES
+   ========================================================= */
 
 const REQUIRED_FEATURES = [
+
     "duration",
     "protocol_type",
     "service",
     "flag",
     "src_bytes",
     "dst_bytes",
+
     "land",
     "wrong_fragment",
     "urgent",
@@ -51,6 +53,7 @@ const REQUIRED_FEATURES = [
     "num_outbound_cmds",
     "is_host_login",
     "is_guest_login",
+
     "count",
     "srv_count",
     "serror_rate",
@@ -60,6 +63,7 @@ const REQUIRED_FEATURES = [
     "same_srv_rate",
     "diff_srv_rate",
     "srv_diff_host_rate",
+
     "dst_host_count",
     "dst_host_srv_count",
     "dst_host_same_srv_rate",
@@ -70,6 +74,7 @@ const REQUIRED_FEATURES = [
     "dst_host_srv_serror_rate",
     "dst_host_rerror_rate",
     "dst_host_srv_rerror_rate"
+
 ];
 
 
@@ -80,7 +85,7 @@ const CATEGORICAL_FEATURES = [
 ];
 
 
-const POSSIBLE_LABEL_COLUMNS = [
+const LABEL_COLUMNS = [
     "label",
     "class",
     "attack",
@@ -91,206 +96,146 @@ const POSSIBLE_LABEL_COLUMNS = [
 ];
 
 
-/* ============================================================
-   DOM READY
-============================================================ */
+/* =========================================================
+   PAGE START
+   ========================================================= */
+   document.addEventListener(
+    "submit",
+    function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    },
+    true
+);
 
 document.addEventListener("DOMContentLoaded", function () {
 
-    console.log("========================================");
-    console.log("Cyber Detection Frontend Loaded");
-    console.log("========================================");
+    console.log("DOM READY");
 
-    const fileInput =
-        document.getElementById("file-input");
+    const fileInput = document.getElementById("file-input");
+    const detectButton = document.getElementById("detect-button");
+    const evaluateButton = document.getElementById("evaluate-button");
+    const analysisButton = document.getElementById("analysis-button");
 
-    const detectButton =
-        document.getElementById("detect-button");
-
-    const evaluateButton =
-        document.getElementById("evaluate-button");
-
-    const analysisButton =
-        document.getElementById("analysis-button");
-
+    console.log("File input:", fileInput);
+    console.log("Detect button:", detectButton);
+    console.log("Evaluate button:", evaluateButton);
+    console.log("Analysis button:", analysisButton);
 
     if (fileInput) {
-        fileInput.addEventListener(
-            "change",
-            handleFileSelection
-        );
+        fileInput.addEventListener("change", handleFileSelection);
     }
-
 
     if (detectButton) {
-        detectButton.addEventListener(
-            "click",
-            detectAttack
-        );
-    }
+        detectButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
 
+            console.log("DETECT ATTACK CLICKED");
+
+            detectAttack();
+        });
+    }
 
     if (evaluateButton) {
-        evaluateButton.addEventListener(
-            "click",
-            evaluateDataset
-        );
-    }
+        evaluateButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
 
+            console.log("========================================");
+            console.log("EVALUATE DATASET CLICKED");
+            console.log("Selected file:", selectedFile);
+            console.log("========================================");
+
+            evaluateDataset();
+        });
+    }
 
     if (analysisButton) {
-        analysisButton.addEventListener(
-            "click",
-            runCompleteAnalysis
-        );
+        analysisButton.addEventListener("click", function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            console.log("RUN COMPLETE ANALYSIS CLICKED");
+
+            runCompleteAnalysis();
+        });
     }
 
-
-    disableActionButtons();
+    disableButtons();
 
     checkBackend();
 
 });
-
-
-/* ============================================================
-   SHOW ELEMENT
-============================================================ */
-
-function showElement(id) {
-
-    const element =
-        document.getElementById(id);
-
-    if (element) {
-        element.classList.remove("hidden");
-
-        /*
-        Some CSS implementations use display:none
-        instead of the hidden class.
-        */
-        element.style.display = "";
-    }
-}
-
-
-/* ============================================================
-   HIDE ELEMENT
-============================================================ */
-
-function hideElement(id) {
-
-    const element =
-        document.getElementById(id);
-
-    if (element) {
-        element.classList.add("hidden");
-    }
-}
-
-
-/* ============================================================
-   DISABLE ACTION BUTTONS
-============================================================ */
-
-function disableActionButtons() {
-
-    const detectButton =
-        document.getElementById("detect-button");
-
-    const evaluateButton =
-        document.getElementById("evaluate-button");
-
-    const analysisButton =
-        document.getElementById("analysis-button");
-
-
-    if (detectButton) {
-        detectButton.disabled = true;
-    }
-
-    if (evaluateButton) {
-        evaluateButton.disabled = true;
-    }
-
-    if (analysisButton) {
-        analysisButton.disabled = true;
-    }
-}
-
-
-/* ============================================================
-   ENABLE DATASET ACTIONS
-============================================================ */
-
-function enableDatasetActions() {
-
-    const detectButton =
-        document.getElementById("detect-button");
-
-    const evaluateButton =
-        document.getElementById("evaluate-button");
-
-    const analysisButton =
-        document.getElementById("analysis-button");
-
-
-    if (detectButton) {
-        detectButton.disabled = false;
-    }
-
-    if (evaluateButton) {
-        evaluateButton.disabled = false;
-    }
-
-    if (analysisButton) {
-        analysisButton.disabled = false;
-    }
-
-
-    /*
-    IMPORTANT FIX:
-
-    These sections were previously hidden after
-    dataset upload and only the buttons were enabled.
-
-    Now the sections themselves are displayed.
-    */
-
-    showElement("detection-section");
-    showElement("evaluation-section");
-    showElement("analysis-section");
-}
-
-
-/* ============================================================
-   BACKEND HEALTH CHECK
-============================================================ */
+/* =========================================================
+   BACKEND CHECK
+   ========================================================= */
 
 async function checkBackend() {
 
-    const status =
-        document.getElementById("backend-status");
+    setText(
+        "backend-status",
+        "Checking..."
+    );
+
 
     const indicator =
-        document.getElementById("backend-indicator");
+        document.getElementById(
+            "backend-indicator"
+        );
+
+
+    if (indicator) {
+
+        indicator.className =
+            "status-indicator checking";
+
+    }
 
 
     try {
 
         const response =
-            await fetch(API_URL + "/health");
-
-
-        if (!response.ok) {
-            throw new Error(
-                "Backend health check failed."
+            await fetchWithTimeout(
+                API_URL + "/health",
+                {
+                    cache: "no-store"
+                },
+                10000
             );
-        }
 
 
         const data =
-            await response.json();
+            await readJSON(response);
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                extractBackendError(data)
+            );
+
+        }
+
+
+        setText(
+            "backend-status",
+            "Backend Connected"
+        );
+
+
+        if (indicator) {
+
+            indicator.className =
+                "status-indicator online";
+
+        }
+
+
+        addLog(
+            "ONLINE",
+            "FastAPI backend connected successfully."
+        );
 
 
         console.log(
@@ -299,90 +244,151 @@ async function checkBackend() {
         );
 
 
-        if (status) {
-            status.textContent =
-                "Backend Connected";
-        }
+    } catch (error) {
 
-
-        if (indicator) {
-            indicator.style.background =
-                "#35d07f";
-        }
-
-    }
-    catch (error) {
-
-        console.error(
-            "Backend connection error:",
-            error
+        setText(
+            "backend-status",
+            "Backend Offline"
         );
 
 
-        if (status) {
-            status.textContent =
-                "Backend Offline";
-        }
-
-
         if (indicator) {
-            indicator.style.background =
-                "#ff5f5f";
+
+            indicator.className =
+                "status-indicator offline";
+
         }
+
+
+        addLog(
+            "ERROR",
+            "Backend connection failed: " +
+            error.message
+        );
+
+
+        console.error(
+            "Backend check failed:",
+            error
+        );
 
     }
+
 }
 
 
-/* ============================================================
+/* =========================================================
+   FETCH WITH TIMEOUT
+   ========================================================= */
+
+async function fetchWithTimeout(
+    url,
+    options = {},
+    timeoutMs = 120000
+) {
+
+    const controller =
+        new AbortController();
+
+
+    const timer =
+        setTimeout(
+            () => controller.abort(),
+            timeoutMs
+        );
+
+
+    try {
+
+        return await fetch(
+            url,
+            {
+                ...options,
+                signal: controller.signal
+            }
+        );
+
+    } finally {
+
+        clearTimeout(timer);
+
+    }
+
+}
+
+
+/* =========================================================
+   READ JSON
+   ========================================================= */
+
+async function readJSON(response) {
+
+    const text =
+        await response.text();
+
+
+    if (!text) {
+
+        return {};
+
+    }
+
+
+    try {
+
+        return JSON.parse(text);
+
+    } catch {
+
+        return {
+            detail: text
+        };
+
+    }
+
+}
+
+
+/* =========================================================
    FILE SELECTION
-============================================================ */
+   ========================================================= */
 
 async function handleFileSelection(event) {
 
-    const input =
-        event.target;
+    console.log("========================================");
+    console.log("FILE SELECTION EVENT FIRED");
+    console.log("========================================");
 
+    const input = event.target;
 
-    selectedFile =
-        input.files[0];
+    if (!input.files || input.files.length === 0) {
+        console.log("No file selected.");
 
-
-    csvRows = [];
-    csvHeaders = [];
-
-
-    disableActionButtons();
-
-
-    /*
-    Hide the sections only while loading.
-
-    After a compatible dataset is loaded,
-    enableDatasetActions() will show them again.
-    */
-
-    hideElement("detection-section");
-    hideElement("evaluation-section");
-    hideElement("analysis-section");
-
-
-    const fileStatus =
-        document.getElementById("file-status");
-
-
-    if (!selectedFile) {
+        selectedFile = null;
 
         setText(
             "file-status",
             "No dataset selected"
         );
 
-        resetDatasetInformation();
+        disableButtons();
+        resetDatasetInfo();
 
         return;
     }
 
+    selectedFile = input.files[0];
+
+    console.log(
+        "Selected file:",
+        selectedFile.name
+    );
+
+    console.log(
+        "File size:",
+        selectedFile.size,
+        "bytes"
+    );
 
     if (
         !selectedFile.name
@@ -390,396 +396,475 @@ async function handleFileSelection(event) {
             .endsWith(".csv")
     ) {
 
-        alert(
-            "Please select a CSV dataset."
-        );
+        alert("Please select a CSV file.");
 
-        resetFileInput();
+        selectedFile = null;
+        input.value = "";
+
+        disableButtons();
 
         return;
     }
 
-
-    if (fileStatus) {
-
-        fileStatus.textContent =
-            "Reading " +
-            selectedFile.name +
-            "...";
-    }
-
+    setText(
+        "file-status",
+        "Reading " + selectedFile.name + "..."
+    );
 
     try {
 
-        await readCSV();
+        const fileText =
+            await selectedFile.text();
 
+        console.log(
+            "CSV characters:",
+            fileText.length
+        );
 
-        if (csvRows.length === 0) {
+        const parsed =
+            parseCSV(fileText);
 
+        csvHeaders =
+            parsed.headers;
+
+        csvRows =
+            parsed.rows;
+
+        console.log(
+            "CSV headers:",
+            csvHeaders
+        );
+
+        console.log(
+            "CSV rows:",
+            csvRows.length
+        );
+
+        if (!csvRows.length) {
             throw new Error(
-                "No valid CSV records were found."
+                "The CSV file contains no data rows."
             );
         }
 
-
-        updateLocalDatasetInformation();
-
+        updateDatasetInfo();
 
         const compatibility =
-            checkDatasetCompatibility();
-
+            checkCompatibility();
 
         displayCompatibility(
             compatibility
         );
 
+        setText(
+            "file-status",
+            selectedFile.name +
+            " loaded successfully — " +
+            csvRows.length.toLocaleString() +
+            " records"
+        );
 
-        if (compatibility.compatible) {
+        /* Evaluation and complete analysis
+           work with uploaded CSV datasets. */
 
-            if (fileStatus) {
+        const evaluateButton =
+            document.getElementById(
+                "evaluate-button"
+            );
 
-                fileStatus.textContent =
-                    selectedFile.name +
-                    " loaded successfully — " +
-                    csvRows.length.toLocaleString() +
-                    " records";
-            }
+        const analysisButton =
+            document.getElementById(
+                "analysis-button"
+            );
 
-
-            enableDatasetActions();
-
-        }
-        else {
-
-            if (fileStatus) {
-
-                fileStatus.textContent =
-                    selectedFile.name +
-                    " loaded — dataset adapter required";
-            }
-
+        if (evaluateButton) {
+            evaluateButton.disabled = false;
         }
 
-    }
-    catch (error) {
+        if (analysisButton) {
+            analysisButton.disabled = false;
+        }
+
+        const detectButton =
+            document.getElementById(
+                "detect-button"
+            );
+
+        if (detectButton) {
+            detectButton.disabled =
+                !compatibility.compatible;
+        }
+
+        hideElement(
+            "detection-section"
+        );
+
+        hideElement(
+            "evaluation-section"
+        );
+
+        hideElement(
+            "analysis-section"
+        );
+
+        addLog(
+            "UPLOAD",
+            selectedFile.name +
+            " loaded successfully."
+        );
+
+        addLog(
+            "DATASET",
+            csvRows.length.toLocaleString() +
+            " records detected."
+        );
+
+        addLog(
+            "READY",
+            "Dataset is ready for evaluation."
+        );
+
+        console.log(
+            "DATASET READY FOR EVALUATION"
+        );
+
+    } catch (error) {
 
         console.error(
             "CSV loading error:",
             error
         );
 
+        selectedFile = null;
+
+        disableButtons();
 
         setText(
             "file-status",
             "Failed to load dataset"
         );
 
-
-        resetDatasetInformation();
-
+        resetDatasetInfo();
 
         alert(
-            "Dataset loading failed.\n\n" +
+            "Could not read the CSV file.\n\n" +
             error.message
         );
-
     }
 }
 
+/* =========================================================
+   CSV PARSER
+   ========================================================= */
 
-/* ============================================================
-   RESET FILE INPUT
-============================================================ */
+function parseCSV(text) {
 
-function resetFileInput() {
+    const records = [];
 
-    const input =
-        document.getElementById("file-input");
+    let row = [];
+
+    let value = "";
+
+    let quoted = false;
 
 
-    if (input) {
-        input.value = "";
+    for (
+        let i = 0;
+        i < text.length;
+        i++
+    ) {
+
+        const ch =
+            text[i];
+
+        const next =
+            text[i + 1];
+
+
+        if (
+            ch === '"' &&
+            quoted &&
+            next === '"'
+        ) {
+
+            value += '"';
+
+            i++;
+
+        }
+
+        else if (ch === '"') {
+
+            quoted = !quoted;
+
+        }
+
+        else if (
+            ch === "," &&
+            !quoted
+        ) {
+
+            row.push(value);
+
+            value = "";
+
+        }
+
+        else if (
+            (ch === "\n" ||
+             ch === "\r") &&
+            !quoted
+        ) {
+
+            if (
+                ch === "\r" &&
+                next === "\n"
+            ) {
+
+                i++;
+
+            }
+
+
+            row.push(value);
+
+            value = "";
+
+
+            if (
+                row.some(
+                    v =>
+                        String(v).trim() !== ""
+                )
+            ) {
+
+                records.push(row);
+
+            }
+
+
+            row = [];
+
+        }
+
+        else {
+
+            value += ch;
+
+        }
+
     }
 
 
-    selectedFile = null;
-    csvRows = [];
-    csvHeaders = [];
+    if (
+        value !== "" ||
+        row.length
+    ) {
+
+        row.push(value);
 
 
-    disableActionButtons();
+        if (
+            row.some(
+                v =>
+                    String(v).trim() !== ""
+            )
+        ) {
+
+            records.push(row);
+
+        }
+
+    }
 
 
-    hideElement("detection-section");
-    hideElement("evaluation-section");
-    hideElement("analysis-section");
+    if (!records.length) {
+
+        return {
+            headers: [],
+            rows: []
+        };
+
+    }
+
+
+    const headers =
+        records[0].map(
+            normalizeColumn
+        );
+
+
+    const rows =
+        records
+            .slice(1)
+            .map(values => {
+
+                const object = {};
+
+
+                headers.forEach(
+                    (header, index) => {
+
+                        object[header] =
+                            values[index] === undefined
+                                ? ""
+                                : String(
+                                    values[index]
+                                ).trim();
+
+                    }
+                );
+
+
+                return object;
+
+            });
+
+
+    return {
+        headers,
+        rows
+    };
+
 }
 
 
-/* ============================================================
-   RESET DATASET INFORMATION
-============================================================ */
+/* =========================================================
+   NORMALIZE COLUMN
+   ========================================================= */
 
-function resetDatasetInformation() {
+function normalizeColumn(value) {
 
-    setText(
-        "datasetName",
-        "—"
-    );
+    return String(value)
 
-    setText(
-        "recordCount",
-        "—"
-    );
+        .replace(
+            /^\uFEFF/,
+            ""
+        )
 
-    setText(
-        "featureCount",
-        "—"
-    );
+        .trim()
 
-    setText(
-        "classCount",
-        "—"
-    );
+        .toLowerCase()
+
+        .replace(
+            /\s+/g,
+            "_"
+        )
+
+        .replace(
+            /[-.]/g,
+            "_"
+        );
+
+}
 
 
-    const compatibility =
+/* =========================================================
+   COMPATIBILITY
+   ========================================================= */
+
+function checkCompatibility() {
+
+    const available =
+        new Set(csvHeaders);
+
+
+    const missing =
+        REQUIRED_FEATURES.filter(
+            feature =>
+                !available.has(feature)
+        );
+
+
+    const labelColumn =
+        LABEL_COLUMNS.find(
+            column =>
+                available.has(column)
+        ) || null;
+
+
+    return {
+
+        compatible:
+            missing.length === 0,
+
+        missing,
+
+        labelColumn
+
+    };
+
+}
+
+
+/* =========================================================
+   DISPLAY COMPATIBILITY
+   ========================================================= */
+
+function displayCompatibility(result) {
+
+    const element =
         document.getElementById(
             "dataset-compatibility"
         );
 
 
-    if (compatibility) {
+    if (!element) {
 
-        compatibility.textContent =
-            "Dataset compatibility will be checked after upload.";
+        return;
 
-        compatibility.style.color = "";
-    }
-}
-
-
-/* ============================================================
-   READ CSV
-============================================================ */
-
-async function readCSV() {
-
-    const text =
-        await selectedFile.text();
-
-
-    const lines =
-        text
-            .split(/\r?\n/)
-            .filter(
-                line =>
-                    line.trim() !== ""
-            );
-
-
-    if (lines.length < 2) {
-
-        throw new Error(
-            "CSV file must contain a header and at least one data row."
-        );
     }
 
 
-    const headers =
-        parseCSVLine(lines[0])
-            .map(
-                header =>
-                    cleanHeader(header)
-            );
+    if (result.compatible) {
+
+        element.textContent =
+            "✓ Dataset contains all required KDDCup99 features.";
 
 
-    if (headers.length === 0) {
-
-        throw new Error(
-            "CSV header could not be read."
-        );
-    }
-
-
-    csvHeaders = headers;
-    csvRows = [];
-
-
-    for (
-        let i = 1;
-        i < lines.length;
-        i++
-    ) {
-
-        const values =
-            parseCSVLine(lines[i]);
-
-
-        if (
-            values.length !==
-            headers.length
-        ) {
-
-            console.warn(
-                "Skipping malformed CSV row:",
-                i + 1
-            );
-
-            continue;
-        }
-
-
-        const row = {};
-
-
-        headers.forEach(
-            function (header, index) {
-
-                row[header] =
-                    cleanCSVValue(
-                        values[index]
-                    );
-
-            }
+        element.classList.remove(
+            "incompatible"
         );
 
 
-        csvRows.push(row);
+        element.classList.add(
+            "compatible"
+        );
+
     }
 
+    else {
 
-    console.log(
-        "CSV headers:",
-        csvHeaders
-    );
-
-
-    console.log(
-        "CSV rows:",
-        csvRows.length
-    );
-}
+        element.textContent =
+            "✓ CSV uploaded successfully. " +
+            "Complete Dataset Analysis is available. " +
+            "Single-record detection requires KDDCup99 fields.";
 
 
-/* ============================================================
-   CLEAN HEADER
-============================================================ */
-
-function cleanHeader(header) {
-
-    return String(header)
-        .trim()
-        .replace(/^"|"$/g, "")
-        .trim();
-}
-
-
-/* ============================================================
-   CLEAN CSV VALUE
-============================================================ */
-
-function cleanCSVValue(value) {
-
-    return String(value ?? "")
-        .trim()
-        .replace(/^"|"$/g, "");
-}
-
-
-/* ============================================================
-   CSV PARSER
-============================================================ */
-
-function parseCSVLine(line) {
-
-    const result = [];
-
-    let current = "";
-
-    let insideQuotes = false;
-
-
-    for (
-        let i = 0;
-        i < line.length;
-        i++
-    ) {
-
-        const char =
-            line[i];
-
-
-        if (char === '"') {
-
-            if (
-                insideQuotes &&
-                line[i + 1] === '"'
-            ) {
-
-                current += '"';
-
-                i++;
-
-            }
-            else {
-
-                insideQuotes =
-                    !insideQuotes;
-            }
-
-        }
-        else if (
-            char === "," &&
-            !insideQuotes
-        ) {
-
-            result.push(current);
-
-            current = "";
-
-        }
-        else {
-
-            current += char;
-        }
-    }
-
-
-    result.push(current);
-
-
-    return result;
-}
-
-
-/* ============================================================
-   UPDATE DATASET INFORMATION
-============================================================ */
-
-function updateLocalDatasetInformation() {
-
-    const featureCount =
-        csvHeaders.length;
-
-
-    const labelColumn =
-        findLabelColumn(
-            csvHeaders
+        element.classList.remove(
+            "compatible"
         );
 
 
-    const actualFeatureCount =
-        labelColumn
-            ? featureCount - 1
-            : featureCount;
+        element.classList.add(
+            "incompatible"
+        );
 
+    }
+
+}
+
+
+/* =========================================================
+   DATASET INFORMATION
+   ========================================================= */
+
+function updateDatasetInfo() {
 
     setText(
         "datasetName",
         selectedFile
             ? selectedFile.name
-            : "Unknown"
+            : "—"
     );
 
 
@@ -791,326 +876,117 @@ function updateLocalDatasetInformation() {
 
     setText(
         "featureCount",
-        actualFeatureCount
+        csvHeaders.length
     );
 
 
-    const classes =
-        getDetectedClasses(
-            labelColumn
+    const label =
+        LABEL_COLUMNS.find(
+            column =>
+                csvHeaders.includes(column)
         );
+
+
+    const classes =
+        label
+            ? new Set(
+                csvRows
+                    .map(
+                        row =>
+                            String(
+                                row[label] || ""
+                            ).trim()
+                    )
+                    .filter(Boolean)
+            )
+            : new Set();
 
 
     setText(
         "classCount",
-        classes.length > 0
-            ? classes.length
-            : "—"
+        classes.size || "—"
+    );
+
+}
+
+
+/* =========================================================
+   RESET DATASET INFORMATION
+   ========================================================= */
+
+function resetDatasetInfo() {
+
+    setText(
+        "datasetName",
+        "—"
     );
 
 
-    console.log(
-        "Dataset information:",
-        {
-            name:
-                selectedFile
-                    ? selectedFile.name
-                    : null,
-
-            rows:
-                csvRows.length,
-
-            columns:
-                csvHeaders.length,
-
-            features:
-                actualFeatureCount,
-
-            label:
-                labelColumn,
-
-            classes:
-                classes
-        }
-    );
-}
-
-
-/* ============================================================
-   FIND LABEL COLUMN
-============================================================ */
-
-function findLabelColumn(headers) {
-
-    const normalized =
-        headers.map(
-            header =>
-                String(header)
-                    .trim()
-                    .toLowerCase()
-        );
-
-
-    for (
-        const possible
-        of POSSIBLE_LABEL_COLUMNS
-    ) {
-
-        const index =
-            normalized.indexOf(
-                possible
-            );
-
-
-        if (index !== -1) {
-
-            return headers[index];
-        }
-    }
-
-
-    return null;
-}
-
-
-/* ============================================================
-   GET CLASSES
-============================================================ */
-
-function getDetectedClasses(labelColumn) {
-
-    if (
-        !labelColumn ||
-        csvRows.length === 0
-    ) {
-
-        return [];
-    }
-
-
-    const classSet =
-        new Set();
-
-
-    csvRows.forEach(
-        function (row) {
-
-            const value =
-                String(
-                    row[labelColumn] ?? ""
-                ).trim();
-
-
-            if (value !== "") {
-
-                classSet.add(value);
-            }
-        }
+    setText(
+        "recordCount",
+        "—"
     );
 
 
-    return Array.from(classSet);
-}
-
-
-/* ============================================================
-   CHECK DATASET COMPATIBILITY
-============================================================ */
-
-function checkDatasetCompatibility() {
-
-    const normalizedHeaders =
-        csvHeaders.map(
-            header =>
-                header
-                    .trim()
-                    .toLowerCase()
-        );
-
-
-    const missingFeatures =
-        REQUIRED_FEATURES.filter(
-            feature =>
-                !normalizedHeaders.includes(
-                    feature.toLowerCase()
-                )
-        );
-
-
-    return {
-
-        compatible:
-            missingFeatures.length === 0,
-
-        missingFeatures:
-            missingFeatures,
-
-        featureCount:
-            csvHeaders.length,
-
-        rows:
-            csvRows.length,
-
-        labelColumn:
-            findLabelColumn(
-                csvHeaders
-            )
-
-    };
-}
-
-
-/* ============================================================
-   DISPLAY COMPATIBILITY
-============================================================ */
-
-function displayCompatibility(
-    compatibility
-) {
-
-    const element =
-        document.getElementById(
-            "dataset-compatibility"
-        );
-
-
-    if (!element) {
-        return;
-    }
-
-
-    if (compatibility.compatible) {
-
-        element.textContent =
-            "✓ Dataset is compatible with the current detection model.";
-
-        element.style.color =
-            "#35d07f";
-
-        return;
-    }
-
-
-    element.textContent =
-        "Dataset detected. This dataset format is not yet supported by the current model.";
-
-
-    element.style.color =
-        "#f0b35b";
-
-
-    console.log(
-        "Missing features:",
-        compatibility.missingFeatures
-    );
-}
-
-
-/* ============================================================
-   PREPARE RECORD
-============================================================ */
-
-function prepareRecord(row) {
-
-    const record = {};
-
-
-    REQUIRED_FEATURES.forEach(
-        function (feature) {
-
-            const value =
-                row[feature];
-
-
-            if (
-                value === undefined ||
-                value === null
-            ) {
-
-                return;
-            }
-
-
-            const stringValue =
-                String(value).trim();
-
-
-            if (
-                CATEGORICAL_FEATURES.includes(
-                    feature
-                )
-            ) {
-
-                record[feature] =
-                    stringValue;
-
-                return;
-            }
-
-
-            const number =
-                Number(stringValue);
-
-
-            if (
-                stringValue !== "" &&
-                Number.isFinite(number)
-            ) {
-
-                record[feature] =
-                    number;
-
-            }
-            else {
-
-                record[feature] =
-                    stringValue;
-            }
-        }
+    setText(
+        "featureCount",
+        "—"
     );
 
 
-    return record;
+    setText(
+        "classCount",
+        "—"
+    );
+
+
+    setText(
+        "dataset-compatibility",
+        ""
+    );
+
 }
 
 
-/* ============================================================
+/* =========================================================
    DETECT ATTACK
-============================================================ */
+   ========================================================= */
 
 async function detectAttack() {
 
-    const button =
-        document.getElementById(
-            "detect-button"
-        );
-
-
-    if (csvRows.length === 0) {
+    if (
+        !selectedFile ||
+        !csvRows.length
+    ) {
 
         alert(
-            "Please upload a cybersecurity dataset first."
+            "Please upload a dataset first."
         );
 
         return;
+
     }
 
 
     const compatibility =
-        checkDatasetCompatibility();
+        checkCompatibility();
 
 
     if (!compatibility.compatible) {
 
         alert(
-            "This dataset is not compatible with the current trained model."
+            "Single-record detection requires " +
+            "the 41 KDDCup99 features.\n\n" +
+            "You can still use Complete Analysis " +
+            "for this CSV."
         );
 
         return;
+
     }
 
 
-    const numberInput =
+    const recordNumberInput =
         document.getElementById(
             "record-number"
         );
@@ -1118,46 +994,27 @@ async function detectAttack() {
 
     let recordNumber =
         Number(
-            numberInput
-                ? numberInput.value
+            recordNumberInput
+                ? recordNumberInput.value
                 : 1
         );
 
 
     if (
         !Number.isInteger(recordNumber) ||
-        recordNumber < 1
+        recordNumber < 1 ||
+        recordNumber > csvRows.length
     ) {
 
         recordNumber = 1;
+
     }
 
 
-    if (recordNumber > csvRows.length) {
-
-        alert(
-            "Record number must be between 1 and " +
-            csvRows.length.toLocaleString()
+    const button =
+        document.getElementById(
+            "detect-button"
         );
-
-        return;
-    }
-
-
-    const row =
-        csvRows[
-            recordNumber - 1
-        ];
-
-
-    const record =
-        prepareRecord(row);
-
-
-    console.log(
-        "Sending record:",
-        record
-    );
 
 
     try {
@@ -1168,13 +1025,23 @@ async function detectAttack() {
 
             button.textContent =
                 "DETECTING...";
+
         }
 
 
+        const record =
+            prepareRecord(
+                csvRows[
+                    recordNumber - 1
+                ]
+            );
+
+
         const response =
-            await fetch(
+            await fetchWithTimeout(
                 API_URL + "/predict",
                 {
+
                     method: "POST",
 
                     headers: {
@@ -1184,18 +1051,16 @@ async function detectAttack() {
 
                     body:
                         JSON.stringify(record)
-                }
+
+                },
+                60000
             );
 
 
         const data =
-            await response.json();
-
-
-        console.log(
-            "Prediction response:",
-            data
-        );
+            await readJSON(
+                response
+            );
 
 
         if (!response.ok) {
@@ -1203,13 +1068,16 @@ async function detectAttack() {
             throw new Error(
                 extractBackendError(data)
             );
+
         }
 
 
-        displayDetectionResult(data);
+        displayDetectionResult(
+            data
+        );
 
-    }
-    catch (error) {
+
+    } catch (error) {
 
         console.error(
             "Prediction error:",
@@ -1222,8 +1090,8 @@ async function detectAttack() {
             error.message
         );
 
-    }
-    finally {
+
+    } finally {
 
         if (button) {
 
@@ -1231,57 +1099,87 @@ async function detectAttack() {
 
             button.textContent =
                 "DETECT ATTACK";
+
         }
+
     }
+
 }
 
 
-/* ============================================================
+/* =========================================================
+   PREPARE RECORD
+   ========================================================= */
+
+function prepareRecord(row) {
+
+    const record = {};
+
+
+    REQUIRED_FEATURES.forEach(
+        feature => {
+
+            if (
+                CATEGORICAL_FEATURES
+                    .includes(feature)
+            ) {
+
+                record[feature] =
+                    row[feature] === undefined ||
+                    row[feature] === ""
+                        ? "Unknown"
+                        : String(
+                            row[feature]
+                        );
+
+            }
+
+            else {
+
+                const number =
+                    Number(
+                        row[feature]
+                    );
+
+
+                record[feature] =
+                    Number.isFinite(number)
+                        ? number
+                        : 0;
+
+            }
+
+        }
+    );
+
+
+    return record;
+
+}
+
+
+/* =========================================================
    DISPLAY DETECTION RESULT
-============================================================ */
+   ========================================================= */
 
 function displayDetectionResult(data) {
 
-    showElement("detection-section");
+    showElement(
+        "detection-section"
+    );
 
 
     const prediction =
         String(
-            data.prediction ??
+            data.prediction ||
             "UNKNOWN"
-        );
-
-
-    const attackType =
-        String(
-            data.attack_type ??
-            "Unknown"
-        );
+        ).toUpperCase();
 
 
     const confidence =
         Number(
-            data.confidence ?? 0
+            data.confidence || 0
         );
-
-
-    const detectionStatus =
-        String(
-            data.detection_status ??
-            (
-                prediction.toUpperCase() === "ATTACK"
-                    ? "Malicious Traffic"
-                    : "Benign Traffic"
-            )
-        );
-
-
-    const iffAnomaly =
-        data.iff_anomaly;
-
-
-    const iffScore =
-        data.iff_score;
 
 
     setText(
@@ -1292,74 +1190,60 @@ function displayDetectionResult(data) {
 
     setText(
         "attackType",
-        attackType
+        data.attack_type ||
+        "Unknown"
     );
 
 
     setText(
         "confidence",
-        confidence.toFixed(2) + "%"
+        confidence.toFixed(2) +
+        "%"
     );
 
 
     setText(
-        "confidence-value",
-        confidence.toFixed(2) + "%"
+        "detectionStatus",
+        data.detection_status ||
+        "Unknown"
     );
 
 
-    const confidenceBar =
+    setText(
+        "iffAnomaly",
+        data.iff_anomaly
+            ? "TRUE"
+            : "FALSE"
+    );
+
+
+    setText(
+        "iffScore",
+        Number(
+            data.iff_score || 0
+        ).toFixed(4)
+    );
+
+
+    const bar =
         document.getElementById(
             "confidence-bar"
         );
 
 
-    if (confidenceBar) {
+    if (bar) {
 
-        const safeConfidence =
+        bar.style.width =
             Math.max(
                 0,
                 Math.min(
                     100,
                     confidence
                 )
-            );
+            ) + "%";
 
-
-        confidenceBar.style.width =
-            safeConfidence + "%";
     }
 
-
-    setText(
-        "detectionStatus",
-        detectionStatus
-    );
-
-
-    setText(
-        "iffAnomaly",
-        iffAnomaly === true
-            ? "True"
-            : iffAnomaly === false
-                ? "False"
-                : "—"
-    );
-
-
-    setText(
-        "iffScore",
-        Number.isFinite(
-            Number(iffScore)
-        )
-            ? Number(iffScore).toFixed(4)
-            : "—"
-    );
-
-
-    /*
-    Optional visual classes.
-    */
 
     const predictionElement =
         document.getElementById(
@@ -1371,43 +1255,48 @@ function displayDetectionResult(data) {
 
         predictionElement.classList.remove(
             "attack",
-            "normal",
-            "malicious",
-            "benign"
+            "normal"
         );
 
 
-        if (
-            prediction.toUpperCase() ===
-            "ATTACK"
-        ) {
+        predictionElement.classList.add(
+            prediction === "ATTACK"
+                ? "attack"
+                : "normal"
+        );
 
-            predictionElement.classList.add(
-                "attack"
-            );
-
-        }
-        else {
-
-            predictionElement.classList.add(
-                "normal"
-            );
-        }
     }
+
 }
 
 
-/* ============================================================
+/* =========================================================
    EVALUATE DATASET
-============================================================ */
+   ========================================================= */
 
 async function evaluateDataset() {
+
+    console.log("========================================");
+    console.log("STARTING DATASET EVALUATION");
+    console.log("========================================");
+
+    if (!selectedFile) {
+
+        console.error(
+            "No selected file."
+        );
+
+        alert(
+            "Please upload a CSV dataset first."
+        );
+
+        return;
+    }
 
     const button =
         document.getElementById(
             "evaluate-button"
         );
-
 
     try {
 
@@ -1419,49 +1308,79 @@ async function evaluateDataset() {
                 "EVALUATING...";
         }
 
+        addLog(
+            "EVALUATION",
+            "Dataset evaluation started."
+        );
 
-        const response =
-            await fetch(
-                API_URL + "/analyze"
-            );
+        showElement(
+            "evaluation-section"
+        );
 
+        setText(
+            "accuracy",
+            "Calculating..."
+        );
 
-        const data =
-            await response.json();
+        setText(
+            "macroPrecision",
+            "Calculating..."
+        );
 
+        setText(
+            "macroRecall",
+            "Calculating..."
+        );
+
+        setText(
+            "macroF1",
+            "Calculating..."
+        );
+
+        setText(
+            "weightedF1",
+            "Calculating..."
+        );
 
         console.log(
-            "Evaluation response:",
+            "Uploading:",
+            selectedFile.name
+        );
+
+        const data =
+            await uploadAnalysis();
+
+        console.log(
+            "EVALUATION RESPONSE:",
             data
         );
 
-
-        if (!response.ok) {
-
-            throw new Error(
-                extractBackendError(data)
-            );
-        }
-
-
         displayEvaluation(data);
 
-    }
-    catch (error) {
+        addLog(
+            "SUCCESS",
+            "Dataset evaluation completed successfully."
+        );
+
+    } catch (error) {
 
         console.error(
             "Evaluation error:",
             error
         );
 
-
-        alert(
-            "Dataset evaluation failed.\n\n" +
+        addLog(
+            "ERROR",
+            "Model evaluation failed: " +
             error.message
         );
 
-    }
-    finally {
+        alert(
+            "Model evaluation failed.\n\n" +
+            error.message
+        );
+
+    } finally {
 
         if (button) {
 
@@ -1473,95 +1392,22 @@ async function evaluateDataset() {
     }
 }
 
-
-/* ============================================================
-   DISPLAY EVALUATION
-============================================================ */
-
-function displayEvaluation(data) {
-
-    showElement("evaluation-section");
-
-
-    const model =
-        data.proposed_model ||
-        data.model ||
-        {};
-
-
-    const metrics =
-        model.metrics ||
-        data.metrics ||
-        {};
-
-
-    setText(
-        "accuracy",
-        metricValue(
-            metrics.accuracy
-        )
-    );
-
-
-    setText(
-        "macroPrecision",
-        metricValue(
-            metrics.macro_precision ??
-            metrics.macroPrecision ??
-            metrics.precision
-        )
-    );
-
-
-    setText(
-        "macroRecall",
-        metricValue(
-            metrics.macro_recall ??
-            metrics.macroRecall ??
-            metrics.recall
-        )
-    );
-
-
-    setText(
-        "macroF1",
-        metricValue(
-            metrics.macro_f1 ??
-            metrics.macroF1 ??
-            metrics.f1
-        )
-    );
-
-
-    setText(
-        "weightedF1",
-        metricValue(
-            metrics.weighted_f1 ??
-            metrics.weightedF1
-        )
-    );
-
-
-    const matrix =
-        model.confusion_matrix ||
-        data.confusion_matrix;
-
-
-    if (matrix) {
-
-        displayConfusionMatrix(
-            matrix,
-            "evaluation-confusion-matrix"
-        );
-    }
-}
-
-
-/* ============================================================
+/* =========================================================
    COMPLETE ANALYSIS
-============================================================ */
+   ========================================================= */
 
 async function runCompleteAnalysis() {
+
+    if (!selectedFile) {
+
+        alert(
+            "Please upload a CSV dataset first."
+        );
+
+        return;
+
+    }
+
 
     const button =
         document.getElementById(
@@ -1577,44 +1423,74 @@ async function runCompleteAnalysis() {
 
             button.textContent =
                 "RUNNING ANALYSIS...";
+
         }
 
 
-        const response =
-            await fetch(
-                API_URL + "/analyze/refresh",
-                {
-                    method: "POST"
-                }
-            );
+        showElement(
+            "analysis-section"
+        );
 
+
+        addLog(
+            "ANALYSIS",
+            "Complete analysis started."
+        );
+
+
+        /*
+         * IMPORTANT:
+         *
+         * Send the actual selected CSV
+         * directly to the backend.
+         *
+         * This prevents the frontend from
+         * returning to the upload page.
+         */
 
         const data =
-            await response.json();
+            await uploadAnalysis();
 
 
-        console.log(
-            "Complete analysis response:",
+        displayFullAnalysis(
             data
         );
 
 
-        if (!response.ok) {
+        addLog(
+            "COMPLETE",
+            "Complete analysis finished successfully."
+        );
 
-            throw new Error(
-                extractBackendError(data)
+
+        const section =
+            document.getElementById(
+                "analysis-section"
             );
+
+
+        if (section) {
+
+            section.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+            });
+
         }
 
 
-        displayFullAnalysis(data);
-
-    }
-    catch (error) {
+    } catch (error) {
 
         console.error(
             "Complete analysis error:",
             error
+        );
+
+
+        addLog(
+            "ERROR",
+            "Complete analysis failed: " +
+            error.message
         );
 
 
@@ -1623,8 +1499,8 @@ async function runCompleteAnalysis() {
             error.message
         );
 
-    }
-    finally {
+
+    } finally {
 
         if (button) {
 
@@ -1632,103 +1508,269 @@ async function runCompleteAnalysis() {
 
             button.textContent =
                 "RUN COMPLETE ANALYSIS";
+
         }
+
     }
+
 }
 
 
-/* ============================================================
-   DISPLAY FULL ANALYSIS
-============================================================ */
+/* =========================================================
+   UPLOAD DATASET TO BACKEND
+   ========================================================= */
+
+async function uploadAnalysis() {
+
+    if (!selectedFile) {
+        throw new Error(
+            "No dataset selected."
+        );
+    }
+
+    console.log(
+        "Sending file to backend:",
+        selectedFile.name
+    );
+
+    const formData =
+        new FormData();
+
+    formData.append(
+        "file",
+        selectedFile
+    );
+
+    const response =
+        await fetchWithTimeout(
+            API_URL +
+            "/analyze-upload",
+            {
+                method: "POST",
+                body: formData
+            },
+            600000
+        );
+
+    console.log(
+        "Backend HTTP status:",
+        response.status
+    );
+
+    const data =
+        await readJSON(response);
+
+    console.log(
+        "Backend response:",
+        data
+    );
+
+    if (!response.ok) {
+
+        throw new Error(
+            extractBackendError(data)
+        );
+    }
+
+    if (
+        data.success === false
+    ) {
+
+        throw new Error(
+            data.message ||
+            data.error ||
+            "Backend analysis failed."
+        );
+    }
+
+    return data;
+}
+/* =========================================================
+   DISPLAY EVALUATION
+   ========================================================= */
+
+function displayEvaluation(data) {
+
+    showElement(
+        "evaluation-section"
+    );
+
+
+    const metrics =
+        data.metrics ||
+        data.overall_metrics ||
+        {};
+
+
+    setText(
+        "accuracy",
+        formatMetric(
+            metrics.accuracy
+        )
+    );
+
+
+    setText(
+        "macroPrecision",
+        formatMetric(
+            metrics.macro_precision ??
+            metrics.precision
+        )
+    );
+
+
+    setText(
+        "macroRecall",
+        formatMetric(
+            metrics.macro_recall ??
+            metrics.recall
+        )
+    );
+
+
+    setText(
+        "macroF1",
+        formatMetric(
+            metrics.macro_f1 ??
+            metrics.f1
+        )
+    );
+
+
+    setText(
+        "weightedF1",
+        formatMetric(
+            metrics.weighted_f1
+        )
+    );
+
+
+    if (
+        data.confusion_matrix
+    ) {
+
+        displayConfusionMatrix(
+            data.confusion_matrix,
+            "evaluation-confusion-matrix"
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   DISPLAY COMPLETE ANALYSIS
+   ========================================================= */
 
 function displayFullAnalysis(data) {
 
-    showElement("analysis-section");
+    showElement(
+        "analysis-section"
+    );
 
 
-    /*
-    Display evaluation metrics too.
-    */
-
-    displayEvaluation(data);
+    const dataset =
+        data.dataset || {};
 
 
-    /*
-    Model comparison
-    */
+    setText(
+        "datasetName",
+        selectedFile
+            ? selectedFile.name
+            : "Uploaded Dataset"
+    );
 
-    displayComparison(
+
+    setText(
+        "recordCount",
+        Number(
+            dataset.original_records ??
+            dataset.records_used ??
+            csvRows.length
+        ).toLocaleString()
+    );
+
+
+    setText(
+        "featureCount",
+        dataset.features ??
+        csvHeaders.length
+    );
+
+
+    setText(
+        "classCount",
+        dataset.classes ??
+        (
+            Array.isArray(
+                dataset.class_names
+            )
+                ? dataset.class_names.length
+                : "—"
+        )
+    );
+
+
+    displayModelComparison(
         data.comparison ||
-        data.algorithm_comparison ||
+        data.model_comparison ||
         []
     );
 
 
-    /*
-    Class performance
-    */
+    if (
+        data.class_performance
+    ) {
 
-    displayClassPerformance(
-        data.class_performance ||
-        data.class_metrics ||
-        {}
-    );
+        displayClassPerformance(
+            data.class_performance
+        );
+
+    }
+
+    else {
+
+        deriveClassPerformance(
+            data.confusion_matrix
+        );
+
+    }
 
 
-    /*
-    Confusion matrix
-    */
-
-    const matrix =
-        data.confusion_matrix ||
-        data.proposed_model?.confusion_matrix;
-
-
-    if (matrix) {
+    if (
+        data.confusion_matrix
+    ) {
 
         displayConfusionMatrix(
-            matrix,
+            data.confusion_matrix,
             "advanced-confusion-matrix"
         );
+
     }
 
 
-    /*
-    ROC
-    */
-
-    if (data.roc) {
-
-        displayROC(
-            data.roc
-        );
-    }
+    const rocData =
+        data.roc ||
+        data.benchmark?.roc ||
+        data.analysis?.roc ||
+        [];
 
 
-    showElement("advanced-section");
-    showElement("class-section");
+    displayROC(
+        rocData
+    );
 
-
-    const section =
-        document.getElementById(
-            "analysis-section"
-        );
-
-
-    if (section) {
-
-        section.scrollIntoView({
-            behavior: "smooth"
-        });
-    }
 }
 
 
-/* ============================================================
+/* =========================================================
    MODEL COMPARISON
-============================================================ */
+   ========================================================= */
 
-function displayComparison(comparison) {
+function displayModelComparison(
+    models
+) {
 
     const body =
         document.getElementById(
@@ -1737,7 +1779,9 @@ function displayComparison(comparison) {
 
 
     if (!body) {
+
         return;
+
     }
 
 
@@ -1745,75 +1789,121 @@ function displayComparison(comparison) {
 
 
     if (
-        !Array.isArray(comparison) ||
-        comparison.length === 0
+        !Array.isArray(models) ||
+        !models.length
     ) {
 
-        body.innerHTML = `
+        body.innerHTML =
+            `
             <tr>
-                <td colspan="5">
-                    No model comparison data available.
+                <td colspan="6">
+                    No model comparison data returned.
                 </td>
             </tr>
-        `;
+            `;
 
         return;
+
     }
 
 
-    comparison.forEach(
-        function (model) {
+    models.forEach(
+        model => {
 
             const row =
-                document.createElement("tr");
+                document.createElement(
+                    "tr"
+                );
 
 
-            row.innerHTML = `
+            const algorithm =
+                model.algorithm ||
+                model.name ||
+                "Unknown";
+
+
+            const precision =
+                model.precision ??
+                model.macro_precision;
+
+
+            const recall =
+                model.recall ??
+                model.macro_recall;
+
+
+            const f1 =
+                model.f1 ??
+                model.macro_f1;
+
+
+            const time =
+                model.training_time ??
+                model.trainingTime;
+
+
+            row.innerHTML =
+                `
                 <td>
                     ${escapeHTML(
-                        model.algorithm ||
-                        model.name ||
-                        "Model"
+                        algorithm
                     )}
                 </td>
 
                 <td>
-                    ${metricValue(
+                    ${formatMetric(
                         model.accuracy
                     )}
                 </td>
 
                 <td>
-                    ${metricValue(
-                        model.precision
+                    ${formatMetric(
+                        precision
                     )}
                 </td>
 
                 <td>
-                    ${metricValue(
-                        model.recall
+                    ${formatMetric(
+                        recall
                     )}
                 </td>
 
                 <td>
-                    ${metricValue(
-                        model.f1
+                    ${formatMetric(
+                        f1
                     )}
                 </td>
-            `;
+
+                <td>
+                    ${
+                        time !== undefined &&
+                        time !== null
+                            ? Number(time)
+                                .toFixed(3) +
+                              " s"
+                            : "—"
+                    }
+                </td>
+                `;
 
 
-            body.appendChild(row);
+            body.appendChild(
+                row
+            );
+
         }
     );
+
 }
 
 
-/* ============================================================
+/* =========================================================
    CLASS PERFORMANCE
-============================================================ */
+   ========================================================= */
 
-function displayClassPerformance(performance) {
+function displayClassPerformance(
+    performance
+) {
 
     const body =
         document.getElementById(
@@ -1822,116 +1912,277 @@ function displayClassPerformance(performance) {
 
 
     if (!body) {
+
         return;
+
     }
 
 
     body.innerHTML = "";
 
 
-    if (Array.isArray(performance)) {
+    if (
+        !performance ||
+        typeof performance !== "object" ||
+        Array.isArray(performance)
+    ) {
 
-        performance.forEach(
-            function (item) {
-
-                addClassRow(
-                    body,
-                    item.class ||
-                    item.label ||
-                    "Class",
-                    item
-                );
-            }
-        );
+        body.innerHTML =
+            `
+            <tr>
+                <td colspan="5">
+                    No class performance available.
+                </td>
+            </tr>
+            `;
 
         return;
+
     }
+
+
+    Object.keys(
+        performance
+    ).forEach(
+        className => {
+
+            const item =
+                performance[
+                    className
+                ] || {};
+
+
+            const row =
+                document.createElement(
+                    "tr"
+                );
+
+
+            row.innerHTML =
+                `
+                <td>
+                    ${escapeHTML(
+                        className
+                    )}
+                </td>
+
+                <td>
+                    ${formatMetric(
+                        item.precision
+                    )}
+                </td>
+
+                <td>
+                    ${formatMetric(
+                        item.recall
+                    )}
+                </td>
+
+                <td>
+                    ${formatMetric(
+                        item.f1
+                    )}
+                </td>
+
+                <td>
+                    ${
+                        item.support !== undefined
+                            ? Number(
+                                item.support
+                            ).toLocaleString()
+                            : "—"
+                    }
+                </td>
+                `;
+
+
+            body.appendChild(
+                row
+            );
+
+        }
+    );
 
 
     if (
-        performance &&
-        typeof performance === "object"
+        !body.children.length
     ) {
 
-        Object.keys(performance)
-            .forEach(
-                function (className) {
-
-                    addClassRow(
-                        body,
-                        className,
-                        performance[className]
-                    );
-                }
-            );
-    }
-
-
-    if (body.children.length === 0) {
-
-        body.innerHTML = `
+        body.innerHTML =
+            `
             <tr>
                 <td colspan="5">
-                    No class performance data available.
+                    No class performance available.
                 </td>
             </tr>
-        `;
+            `;
+
     }
+
 }
 
 
-/* ============================================================
-   ADD CLASS ROW
-============================================================ */
+/* =========================================================
+   DERIVE CLASS PERFORMANCE
+   ========================================================= */
 
-function addClassRow(
-    body,
-    className,
-    item
+function deriveClassPerformance(
+    cm
 ) {
 
-    item = item || {};
+    if (
+        !cm ||
+        !Array.isArray(cm.matrix)
+    ) {
+
+        return;
+
+    }
 
 
-    const row =
-        document.createElement("tr");
+    const labels =
+        Array.isArray(cm.labels)
+            ? cm.labels
+            : cm.matrix.map(
+                (_, index) =>
+                    "Class " + index
+            );
 
 
-    row.innerHTML = `
-        <td>
-            ${escapeHTML(className)}
-        </td>
-
-        <td>
-            ${metricValue(item.precision)}
-        </td>
-
-        <td>
-            ${metricValue(item.recall)}
-        </td>
-
-        <td>
-            ${metricValue(item.f1)}
-        </td>
-
-        <td>
-            ${Number(
-                item.support || 0
-            ).toLocaleString()}
-        </td>
-    `;
+    const matrix =
+        cm.matrix;
 
 
-    body.appendChild(row);
+    const performance = {};
+
+
+    labels.forEach(
+        (label, i) => {
+
+            const tp =
+                Number(
+                    matrix[i]?.[i] || 0
+                );
+
+
+            let fp = 0;
+
+            let fn = 0;
+
+            let support = 0;
+
+
+            for (
+                let r = 0;
+                r < matrix.length;
+                r++
+            ) {
+
+                for (
+                    let c = 0;
+                    c <
+                    (
+                        matrix[r]?.length ||
+                        0
+                    );
+                    c++
+                ) {
+
+                    const value =
+                        Number(
+                            matrix[r][c] ||
+                            0
+                        );
+
+
+                    if (r === i) {
+
+                        support += value;
+
+                    }
+
+
+                    if (
+                        c === i &&
+                        r !== i
+                    ) {
+
+                        fp += value;
+
+                    }
+
+
+                    if (
+                        r === i &&
+                        c !== i
+                    ) {
+
+                        fn += value;
+
+                    }
+
+                }
+
+            }
+
+
+            const precision =
+                tp + fp
+                    ? tp /
+                      (tp + fp)
+                    : 0;
+
+
+            const recall =
+                tp + fn
+                    ? tp /
+                      (tp + fn)
+                    : 0;
+
+
+            const f1 =
+                precision + recall
+                    ? (
+                        2 *
+                        precision *
+                        recall
+                    ) /
+                    (
+                        precision +
+                        recall
+                    )
+                    : 0;
+
+
+            performance[label] = {
+
+                precision,
+
+                recall,
+
+                f1,
+
+                support
+
+            };
+
+        }
+    );
+
+
+    displayClassPerformance(
+        performance
+    );
+
 }
 
 
-/* ============================================================
+/* =========================================================
    CONFUSION MATRIX
-============================================================ */
+   ========================================================= */
 
 function displayConfusionMatrix(
-    matrixData,
+    data,
     elementId
 ) {
 
@@ -1942,134 +2193,157 @@ function displayConfusionMatrix(
 
 
     if (!container) {
+
         return;
-    }
-
-
-    let labels;
-    let matrix;
-
-
-    if (
-        matrixData &&
-        matrixData.labels &&
-        matrixData.matrix
-    ) {
-
-        labels =
-            matrixData.labels;
-
-        matrix =
-            matrixData.matrix;
 
     }
-    else {
-
-        labels = [
-            "Normal",
-            "DoS",
-            "Probe",
-            "R2L",
-            "U2R"
-        ];
-
-        matrix =
-            matrixData;
-    }
 
 
-    if (!Array.isArray(matrix)) {
+    const labels =
+        Array.isArray(data?.labels)
+            ? data.labels
+            : [];
+
+
+    const matrix =
+        Array.isArray(data?.matrix)
+            ? data.matrix
+            : (
+                Array.isArray(data)
+                    ? data
+                    : []
+            );
+
+
+    if (!matrix.length) {
 
         container.textContent =
             "Confusion matrix data unavailable.";
 
         return;
+
     }
 
 
+    const finalLabels =
+        labels.length
+            ? labels
+            : matrix.map(
+                (_, index) =>
+                    "Class " + index
+            );
+
+
     let html =
-        "<table class='confusion-table'>";
+        `
+        <table>
+
+            <thead>
+
+                <tr>
+
+                    <th>
+                        Actual / Predicted
+                    </th>
+        `;
 
 
-    html +=
-        "<thead><tr>";
-
-
-    html +=
-        "<th>Actual / Predicted</th>";
-
-
-    labels.forEach(
-        function (label) {
+    finalLabels.forEach(
+        label => {
 
             html +=
-                "<th>" +
-                escapeHTML(label) +
-                "</th>";
+                `
+                <th>
+                    ${escapeHTML(label)}
+                </th>
+                `;
+
         }
     );
 
 
     html +=
-        "</tr></thead>";
+        `
+                </tr>
 
+            </thead>
 
-    html +=
-        "<tbody>";
+            <tbody>
+        `;
 
 
     matrix.forEach(
-        function (row, index) {
+        (row, r) => {
 
             html +=
-                "<tr>";
+                `
+                <tr>
+
+                    <th>
+                        ${escapeHTML(
+                            finalLabels[r] ||
+                            "Class " + r
+                        )}
+                    </th>
+                `;
 
 
-            html +=
-                "<th>" +
-                escapeHTML(
-                    labels[index] ||
-                    "Class"
-                ) +
-                "</th>";
+            (
+                Array.isArray(row)
+                    ? row
+                    : []
+            ).forEach(
+                value => {
 
-
-            if (Array.isArray(row)) {
-
-                row.forEach(
-                    function (value) {
-
-                        html +=
-                            "<td>" +
-                            Number(
+                    html +=
+                        `
+                        <td>
+                            ${Number(
                                 value || 0
-                            ).toLocaleString() +
-                            "</td>";
-                    }
-                );
-            }
+                            ).toLocaleString()}
+                        </td>
+                        `;
+
+                }
+            );
 
 
             html +=
-                "</tr>";
+                `
+                </tr>
+                `;
+
         }
     );
 
 
     html +=
-        "</tbody></table>";
+        `
+            </tbody>
+
+        </table>
+        `;
 
 
     container.innerHTML =
         html;
+
 }
 
 
-/* ============================================================
+/* =========================================================
    ROC CURVE
-============================================================ */
+   ========================================================= */
 
-function displayROC(rocData) {
+function displayROC(
+    rocData
+) {
+
+    console.log(
+        "ROC DATA RECEIVED:",
+        rocData
+    );
+
 
     const canvas =
         document.getElementById(
@@ -2077,8 +2351,16 @@ function displayROC(rocData) {
         );
 
 
+    const message =
+        document.getElementById(
+            "roc-message"
+        );
+
+
     if (!canvas) {
+
         return;
+
     }
 
 
@@ -2088,102 +2370,263 @@ function displayROC(rocData) {
     ) {
 
         console.warn(
-            "Chart.js is not available."
+            "Chart.js is not loaded."
         );
 
+        if (message) {
+
+            message.textContent =
+                "Chart.js could not be loaded.";
+
+        }
+
         return;
+
     }
 
 
+    let curves = [];
+
+
     if (
-        !rocData ||
-        typeof rocData !== "object"
+        Array.isArray(rocData)
     ) {
 
+        curves = rocData;
+
+    }
+
+    else if (
+        rocData &&
+        Array.isArray(
+            rocData.curves
+        )
+    ) {
+
+        curves =
+            rocData.curves;
+
+    }
+
+    else if (
+        rocData &&
+        typeof rocData ===
+            "object"
+    ) {
+
+        Object.keys(
+            rocData
+        ).forEach(
+            key => {
+
+                const item =
+                    rocData[key];
+
+
+                if (
+                    item &&
+                    Array.isArray(
+                        item.fpr
+                    ) &&
+                    Array.isArray(
+                        item.tpr
+                    )
+                ) {
+
+                    curves.push({
+
+                        class_name:
+                            item.class_name ||
+                            key,
+
+                        fpr:
+                            item.fpr,
+
+                        tpr:
+                            item.tpr,
+
+                        auc:
+                            item.auc
+
+                    });
+
+                }
+
+            }
+        );
+
+    }
+
+
+    if (!curves.length) {
+
+        console.warn(
+            "No ROC data returned."
+        );
+
+
+        if (message) {
+
+            message.textContent =
+                "ROC curve data is not available for this analysis.";
+
+        }
+
+
         return;
+
+    }
+
+
+    if (message) {
+
+        message.textContent = "";
+
+    }
+
+
+    if (rocChart) {
+
+        rocChart.destroy();
+
+        rocChart = null;
+
     }
 
 
     const datasets = [];
 
 
-    Object.keys(rocData)
-        .forEach(
-            function (className) {
+    curves.forEach(
+        (curve, index) => {
 
-                const item =
-                    rocData[className];
+            if (
+                !curve ||
+                !Array.isArray(
+                    curve.fpr
+                ) ||
+                !Array.isArray(
+                    curve.tpr
+                )
+            ) {
 
+                return;
 
-                if (
-                    !item ||
-                    !Array.isArray(item.fpr) ||
-                    !Array.isArray(item.tpr)
-                ) {
-
-                    return;
-                }
-
-
-                const points =
-                    item.fpr.map(
-                        function (fpr, index) {
-
-                            return {
-                                x: Number(fpr),
-                                y: Number(
-                                    item.tpr[index]
-                                )
-                            };
-                        }
-                    );
+            }
 
 
-                datasets.push({
+            const points = [];
 
-                    label:
-                        className +
-                        (
-                            item.auc !== undefined
-                                ? " (AUC " +
-                                  Number(
-                                      item.auc
-                                  ).toFixed(4) +
-                                  ")"
-                                : ""
+
+            const length =
+                Math.min(
+                    curve.fpr.length,
+                    curve.tpr.length
+                );
+
+
+            for (
+                let i = 0;
+                i < length;
+                i++
+            ) {
+
+                points.push({
+
+                    x:
+                        Number(
+                            curve.fpr[i]
                         ),
 
-                    data:
-                        points,
+                    y:
+                        Number(
+                            curve.tpr[i]
+                        )
 
-                    fill:
-                        false,
-
-                    tension:
-                        0.15
                 });
+
             }
-        );
 
 
-    if (datasets.length === 0) {
-        return;
-    }
+            datasets.push({
+
+                label:
+                    (
+                        curve.class_name ||
+                        curve.className ||
+                        "Class " +
+                        (index + 1)
+                    ) +
+
+                    (
+                        curve.auc !== undefined
+                            ? " (AUC: " +
+                              Number(
+                                  curve.auc
+                              ).toFixed(3) +
+                              ")"
+                            : ""
+                    ),
+
+                data: points,
+
+                parsing: false,
+
+                fill: false,
+
+                tension: 0.15,
+
+                borderWidth: 2,
+
+                pointRadius: 0
+
+            });
+
+        }
+    );
 
 
-    if (rocChart) {
-        rocChart.destroy();
-    }
+    datasets.push({
+
+        label:
+            "Random Classifier",
+
+        data: [
+            {
+                x: 0,
+                y: 0
+            },
+            {
+                x: 1,
+                y: 1
+            }
+        ],
+
+        parsing: false,
+
+        fill: false,
+
+        borderWidth: 1,
+
+        borderDash: [
+            6,
+            6
+        ],
+
+        pointRadius: 0
+
+    });
 
 
     rocChart =
         new Chart(
             canvas,
             {
+
                 type: "line",
 
                 data: {
-                    datasets: datasets
+                    datasets
                 },
 
                 options: {
@@ -2192,8 +2635,6 @@ function displayROC(rocData) {
 
                     maintainAspectRatio:
                         false,
-
-                    parsing: false,
 
                     scales: {
 
@@ -2206,12 +2647,12 @@ function displayROC(rocData) {
                             max: 1,
 
                             title: {
-
                                 display: true,
 
                                 text:
                                     "False Positive Rate"
                             }
+
                         },
 
                         y: {
@@ -2221,28 +2662,300 @@ function displayROC(rocData) {
                             max: 1,
 
                             title: {
-
                                 display: true,
 
                                 text:
                                     "True Positive Rate"
                             }
+
                         }
+
+                    },
+
+                    plugins: {
+
+                        legend: {
+                            display: true
+                        },
+
+                        title: {
+
+                            display: true,
+
+                            text:
+                                "ROC Curve"
+
+                        }
+
                     }
+
                 }
+
             }
         );
+
 }
 
 
-/* ============================================================
-   BACKEND ERROR
-============================================================ */
+/* =========================================================
+   BUTTON HELPERS
+   ========================================================= */
 
-function extractBackendError(data) {
+function disableButtons() {
+
+    [
+        "detect-button",
+        "evaluate-button",
+        "analysis-button"
+    ].forEach(
+        id => {
+
+            const button =
+                document.getElementById(
+                    id
+                );
+
+
+            if (button) {
+
+                button.disabled = true;
+
+            }
+
+        }
+    );
+
+}
+
+
+function enableAnalysisButtons() {
+
+    [
+        "evaluate-button",
+        "analysis-button"
+    ].forEach(
+        id => {
+
+            const button =
+                document.getElementById(
+                    id
+                );
+
+
+            if (button) {
+
+                button.disabled = false;
+
+            }
+
+        }
+    );
+
+}
+
+
+/* =========================================================
+   UI HELPERS
+   ========================================================= */
+
+function showElement(id) {
+
+    const element =
+        document.getElementById(id);
+
+
+    if (element) {
+
+        element.classList.remove(
+            "hidden"
+        );
+
+    }
+
+}
+
+
+function hideElement(id) {
+
+    const element =
+        document.getElementById(id);
+
+
+    if (element) {
+
+        element.classList.add(
+            "hidden"
+        );
+
+    }
+
+}
+
+
+function setText(
+    id,
+    value
+) {
+
+    const element =
+        document.getElementById(id);
+
+
+    if (element) {
+
+        element.textContent =
+            value === undefined ||
+            value === null
+                ? "—"
+                : String(value);
+
+    }
+
+}
+
+
+/* =========================================================
+   METRIC FORMAT
+   ========================================================= */
+
+function formatMetric(value) {
+
+    if (
+        value === undefined ||
+        value === null ||
+        value === ""
+    ) {
+
+        return "—";
+
+    }
+
+
+    const number =
+        Number(value);
+
+
+    if (
+        !Number.isFinite(number)
+    ) {
+
+        return String(value);
+
+    }
+
+
+    return (
+        number <= 1
+            ? number * 100
+            : number
+    ).toFixed(2) + "%";
+
+}
+
+
+/* =========================================================
+   HTML ESCAPE
+   ========================================================= */
+
+function escapeHTML(value) {
+
+    return String(
+        value ?? ""
+    )
+
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+
+        .replace(
+            /</g,
+            "&lt;"
+        )
+
+        .replace(
+            />/g,
+            "&gt;"
+        )
+
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+
+}
+
+
+/* =========================================================
+   ACTIVITY LOG
+   ========================================================= */
+
+function addLog(
+    type,
+    message
+) {
+
+    console.log(
+        "[" +
+        type +
+        "]",
+        message
+    );
+
+
+    const log =
+        document.getElementById(
+            "activity-log"
+        );
+
+
+    if (!log) {
+
+        return;
+
+    }
+
+
+    const line =
+        document.createElement(
+            "div"
+        );
+
+
+    line.className =
+        "log-line";
+
+
+    line.textContent =
+        type +
+        ": " +
+        message;
+
+
+    log.prepend(
+        line
+    );
+
+}
+
+
+/* =========================================================
+   BACKEND ERROR
+   ========================================================= */
+
+function extractBackendError(
+    data
+) {
 
     if (!data) {
+
         return "Unknown backend error.";
+
     }
 
 
@@ -2252,140 +2965,74 @@ function extractBackendError(data) {
     ) {
 
         return data.detail;
+
     }
 
 
     if (
         data.detail &&
         typeof data.detail ===
-        "object"
+            "object"
     ) {
 
-        if (data.detail.message) {
-
-            let message =
-                data.detail.message;
-
-
-            if (
-                Array.isArray(
-                    data.detail.missing_features
-                )
-            ) {
-
-                message +=
-                    "\n\nMissing features:\n" +
-                    data.detail.missing_features.join(
-                        ", "
-                    );
-            }
-
-
-            return message;
-        }
-
-
-        return JSON.stringify(
-            data.detail
+        return (
+            data.detail.message ||
+            data.detail.error ||
+            JSON.stringify(
+                data.detail
+            )
         );
+
     }
 
 
-    if (data.error) {
+    return (
+        data.message ||
+        data.error ||
+        "Backend request failed."
+    );
 
-        return String(
-            data.error
+}
+
+
+/* =========================================================
+   GLOBAL ERROR LOGGING
+   ========================================================= */
+
+window.addEventListener(
+    "error",
+    event => {
+
+        console.error(
+            "Frontend error:",
+            event.error ||
+            event.message
         );
+
     }
+);
 
 
-    return "Backend request failed.";
-}
+window.addEventListener(
+    "unhandledrejection",
+    event => {
 
+        console.error(
+            "Unhandled promise rejection:",
+            event.reason
+        );
 
-/* ============================================================
-   SET TEXT
-============================================================ */
-
-function setText(id, value) {
-
-    const element =
-        document.getElementById(id);
-
-
-    if (element) {
-
-        element.textContent =
-            value;
     }
-}
+);
 
-
-/* ============================================================
-   METRIC FORMAT
-============================================================ */
-
-function metricValue(value) {
-
-    if (
-        value === undefined ||
-        value === null ||
-        value === ""
-    ) {
-
-        return "—";
-    }
-
-
-    const number =
-        Number(value);
-
-
-    if (!Number.isFinite(number)) {
-
-        return "—";
-    }
-
-
-    /*
-    Backend metrics may be returned as:
-
-    0.9995
-    OR
-    99.95
-
-    Convert decimal metrics to percentage.
-    */
-
-    const percentage =
-        number <= 1
-            ? number * 100
-            : number;
-
-
-    return percentage.toFixed(2) + "%";
-}
-
-
-/* ============================================================
-   ESCAPE HTML
-============================================================ */
-
-function escapeHTML(value) {
-
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-
-/* ============================================================
-   DEBUG HELPER
-============================================================ */
 
 console.log(
-    "Universal Cyber Detection app.js loaded successfully."
+    "Universal Cyber Detection app.js loaded."
+);
+console.log(
+    "🔥🔥🔥 NEW APP.JS IS RUNNING 🔥🔥🔥"
+);
+
+console.log(
+    "APP JS VERSION: 2026-09-26-FIXED"
 );
