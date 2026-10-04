@@ -314,8 +314,11 @@ async def inspect_dataset(
         # ------------------------------------------------------------
 # MEMORY-SAFE CSV READING FOR RENDER
 # ------------------------------------------------------------
+# ------------------------------------------------------------
+# MEMORY-SAFE CSV READING
+# ------------------------------------------------------------
 
-MAX_UPLOAD_EVAL_ROWS = 300
+MAX_UPLOAD_EVAL_ROWS = 200
 
 try:
     file.file.seek(0)
@@ -326,15 +329,12 @@ try:
     )
 
 except Exception as error:
-
     raise HTTPException(
         status_code=400,
         detail=f"Unable to read CSV file: {str(error)}"
     )
 
-print(
-    f"Evaluation rows loaded: {len(dataframe)}"
-)
+print(f"Evaluation rows loaded: {len(dataframe)}")
 
         dataframe = pd.read_csv(
             BytesIO(contents)
