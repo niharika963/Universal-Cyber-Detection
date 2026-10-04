@@ -1,3 +1,4 @@
+import gc
 import time
 
 import numpy as np
@@ -16,7 +17,7 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
     roc_curve,
-    auc
+    auc,
 )
 
 from sklearn.tree import DecisionTreeClassifier
@@ -33,8 +34,9 @@ from lightgbm import LGBMClassifier
 
 RANDOM_STATE = 42
 
-# Number of records used for interactive evaluation.
-MAX_ROWS = 10000
+# Render Free has a 512 MB RAM limit.
+# Keep interactive evaluation deliberately small.
+MAX_ROWS = 1500
 
 
 # ============================================================
@@ -49,7 +51,7 @@ LABEL_COLUMNS = [
     "attack_type",
     "connection_type",
     "category",
-    "output"
+    "output",
 ]
 
 
@@ -89,7 +91,7 @@ KDD_ATTACK_MAPPING = {
     "buffer_overflow": "U2R",
     "loadmodule": "U2R",
     "perl": "U2R",
-    "rootkit": "U2R"
+    "rootkit": "U2R",
 }
 
 
@@ -145,12 +147,14 @@ def normalize_labels(y):
 
     for value in y:
 
-        key = value.lower()
+        key = value.lower().rstrip(".")
 
-        if key in KDD_ATTACK_MAPPING:
-            result.append(KDD_ATTACK_MAPPING[key])
-        else:
-            result.append(value)
+        result.append(
+            KDD_ATTACK_MAPPING.get(
+                key,
+                value
+            )
+        )
 
     return pd.Series(
         result,
@@ -174,16 +178,19 @@ def prepare_dataset(df):
 
         raise ValueError(
             "No label column found. "
-            "Use one of: label, class, target, attack, "
-            "attack_type, connection_type or category."
+            "Use one of: label, class, target, "
+            "attack, attack_type, connection_type "
+            "or category."
         )
 
-    # Remove completely empty rows.
+    # --------------------------------------------------------
+    # REMOVE EMPTY / DUPLICATE ROWS
+    # --------------------------------------------------------
+
     df = df.dropna(
         how="all"
     )
 
-    # Remove duplicate rows.
     df = df.drop_duplicates()
 
     if len(df) < 20:
@@ -197,6 +204,14 @@ def prepare_dataset(df):
     # --------------------------------------------------------
 
     if len(df) > MAX_ROWS:
+
+        print(
+            f"Dataset contains {len(df)} records."
+        )
+
+        print(
+            f"Limiting benchmark to {MAX_ROWS} records."
+        )
 
         try:
 
@@ -250,18 +265,21 @@ def prepare_dataset(df):
             rare_classes
         )
 
-        X = df.drop(
-            columns=[label_column]
-        ).loc[
-            valid_mask
-        ].reset_index(
-            drop=True
+        X = (
+            df.drop(
+                columns=[label_column]
+            )
+            .loc[valid_mask]
+            .reset_index(
+                drop=True
+            )
         )
 
-        y = y.loc[
-            valid_mask
-        ].reset_index(
-            drop=True
+        y = (
+            y.loc[valid_mask]
+            .reset_index(
+                drop=True
+            )
         )
 
     else:
@@ -287,6 +305,11 @@ def prepare_dataset(df):
     ]
 
     if constant_columns:
+
+        print(
+            "Constant columns removed:",
+            constant_columns
+        )
 
         X = X.drop(
             columns=constant_columns
@@ -346,6 +369,10 @@ def build_preprocessor(X):
         ]
     ).columns.tolist()
 
+    # --------------------------------------------------------
+    # NUMERIC PIPELINE
+    # --------------------------------------------------------
+
     numeric_pipeline = Pipeline(
         steps=[
             (
@@ -356,6 +383,14 @@ def build_preprocessor(X):
             )
         ]
     )
+
+    # --------------------------------------------------------
+    # CATEGORICAL PIPELINE
+    # --------------------------------------------------------
+    #
+    # IMPORTANT:
+    # sparse_output=True prevents huge dense matrices.
+    #
 
     categorical_pipeline = Pipeline(
         steps=[
@@ -369,7 +404,7 @@ def build_preprocessor(X):
                 "onehot",
                 OneHotEncoder(
                     handle_unknown="ignore",
-                    sparse_output=False
+                    sparse_output=True
                 )
             )
         ]
@@ -425,10 +460,18 @@ def evaluate_model(
 
     start_time = time.perf_counter()
 
+    # --------------------------------------------------------
+    # TRAIN
+    # --------------------------------------------------------
+
     model.fit(
         X_train,
         y_train
     )
+
+    # --------------------------------------------------------
+    # PREDICT
+    # --------------------------------------------------------
 
     predictions = model.predict(
         X_test
@@ -438,6 +481,10 @@ def evaluate_model(
         time.perf_counter()
         - start_time
     )
+
+    # --------------------------------------------------------
+    # METRICS
+    # --------------------------------------------------------
 
     accuracy = accuracy_score(
         y_test,
@@ -473,32 +520,49 @@ def evaluate_model(
     )
 
     return {
-        "algorithm": name,
-        "accuracy": round(
-            accuracy * 100,
-            4
-        ),
-        "precision": round(
-            precision * 100,
-            4
-        ),
-        "recall": round(
-            recall * 100,
-            4
-        ),
-        "f1": round(
-            f1 * 100,
-            4
-        ),
-        "weighted_f1": round(
-            weighted_f1 * 100,
-            4
-        ),
-        "training_time": round(
-            elapsed,
-            3
-        ),
-        "predictions": predictions
+
+        "algorithm":
+            name,
+
+        "accuracy":
+            round(
+                accuracy * 100,
+                4
+            ),
+
+        "precision":
+            round(
+                precision * 100,
+                4
+            ),
+
+        "recall":
+            round(
+                recall * 100,
+                4
+            ),
+
+        "f1":
+            round(
+                f1 * 100,
+                4
+            ),
+
+        "weighted_f1":
+            round(
+                weighted_f1 * 100,
+                4
+            ),
+
+        "training_time":
+            round(
+                elapsed,
+                3
+            ),
+
+        "predictions":
+            predictions
+
     }, model
 
 
@@ -518,42 +582,111 @@ def evaluate_proposed_model(
     start_time = time.perf_counter()
 
     # --------------------------------------------------------
+    # CONVERT TO DENSE ONLY FOR PROPOSED MODEL
+    # --------------------------------------------------------
+    #
+    # Baseline models remain sparse.
+    # The benchmark is capped at 1500 rows, so this conversion
+    # remains bounded.
+    #
+
+    if hasattr(
+        X_train,
+        "toarray"
+    ):
+
+        X_train_dense = (
+            X_train
+            .toarray()
+            .astype(
+                np.float32,
+                copy=False
+            )
+        )
+
+        X_test_dense = (
+            X_test
+            .toarray()
+            .astype(
+                np.float32,
+                copy=False
+            )
+        )
+
+    else:
+
+        X_train_dense = np.asarray(
+            X_train,
+            dtype=np.float32
+        )
+
+        X_test_dense = np.asarray(
+            X_test,
+            dtype=np.float32
+        )
+
+    # --------------------------------------------------------
     # IALP-INSPIRED FEATURE NORMALIZATION
     # --------------------------------------------------------
 
     train_mean = np.mean(
-        X_train,
-        axis=0
+        X_train_dense,
+        axis=0,
+        dtype=np.float32
     )
 
     train_std = np.std(
-        X_train,
-        axis=0
+        X_train_dense,
+        axis=0,
+        dtype=np.float32
     )
 
     train_std = np.where(
         train_std < 1e-8,
         1.0,
         train_std
+    ).astype(
+        np.float32
     )
 
     X_train_ialp = (
-        X_train - train_mean
-    ) / train_std
+        (
+            X_train_dense
+            - train_mean
+        )
+        / train_std
+    ).astype(
+        np.float32,
+        copy=False
+    )
 
     X_test_ialp = (
-        X_test - train_mean
-    ) / train_std
+        (
+            X_test_dense
+            - train_mean
+        )
+        / train_std
+    ).astype(
+        np.float32,
+        copy=False
+    )
+
+    del X_train_dense
+    del X_test_dense
+    del train_mean
+    del train_std
+
+    gc.collect()
 
     # --------------------------------------------------------
     # IFF / ISOLATION FOREST
     # --------------------------------------------------------
 
     iff = IsolationForest(
-        n_estimators=100,
+        n_estimators=30,
         contamination="auto",
         random_state=RANDOM_STATE,
-        n_jobs=-1
+        n_jobs=1
     )
 
     iff.fit(
@@ -563,14 +696,32 @@ def evaluate_proposed_model(
     train_anomaly_score = (
         iff.decision_function(
             X_train_ialp
-        ).reshape(-1, 1)
+        )
+        .reshape(
+            -1,
+            1
+        )
+        .astype(
+            np.float32
+        )
     )
 
     test_anomaly_score = (
         iff.decision_function(
             X_test_ialp
-        ).reshape(-1, 1)
+        )
+        .reshape(
+            -1,
+            1
+        )
+        .astype(
+            np.float32
+        )
     )
+
+    del iff
+
+    gc.collect()
 
     # --------------------------------------------------------
     # COMBINE FEATURES
@@ -581,6 +732,9 @@ def evaluate_proposed_model(
             X_train_ialp,
             train_anomaly_score
         ]
+    ).astype(
+        np.float32,
+        copy=False
     )
 
     X_test_final = np.hstack(
@@ -588,20 +742,38 @@ def evaluate_proposed_model(
             X_test_ialp,
             test_anomaly_score
         ]
+    ).astype(
+        np.float32,
+        copy=False
     )
+
+    del X_train_ialp
+    del X_test_ialp
+    del train_anomaly_score
+    del test_anomaly_score
+
+    gc.collect()
 
     # --------------------------------------------------------
     # XGBOOST
     # --------------------------------------------------------
 
     xgb = XGBClassifier(
-        n_estimators=200,
-        max_depth=6,
+
+        n_estimators=50,
+
+        max_depth=4,
+
         learning_rate=0.1,
-        subsample=0.9,
-        colsample_bytree=0.9,
+
+        subsample=0.8,
+
+        colsample_bytree=0.8,
+
         random_state=RANDOM_STATE,
-        n_jobs=-1,
+
+        n_jobs=1,
+
         eval_metric="mlogloss"
     )
 
@@ -618,6 +790,10 @@ def evaluate_proposed_model(
         time.perf_counter()
         - start_time
     )
+
+    # --------------------------------------------------------
+    # METRICS
+    # --------------------------------------------------------
 
     accuracy = accuracy_score(
         y_test,
@@ -652,7 +828,18 @@ def evaluate_proposed_model(
         zero_division=0
     )
 
+    # --------------------------------------------------------
+    # RELEASE PROPOSED MODEL
+    # --------------------------------------------------------
+
+    del xgb
+    del X_train_final
+    del X_test_final
+
+    gc.collect()
+
     return {
+
         "algorithm":
             "IALP + IFF + XGBoost",
 
@@ -708,8 +895,11 @@ def build_confusion_matrix(
 ):
 
     matrix = confusion_matrix(
+
         y_test,
+
         predictions,
+
         labels=range(
             len(
                 label_encoder.classes_
@@ -718,11 +908,13 @@ def build_confusion_matrix(
     )
 
     return {
+
         "labels": [
             str(label)
             for label
             in label_encoder.classes_
         ],
+
         "matrix":
             matrix.tolist()
     }
@@ -738,44 +930,55 @@ def build_class_performance(
     label_encoder
 ):
 
+    labels = range(
+        len(
+            label_encoder.classes_
+        )
+    )
+
     precision_values = precision_score(
+
         y_test,
+
         predictions,
+
         average=None,
-        labels=range(
-            len(
-                label_encoder.classes_
-            )
-        ),
+
+        labels=labels,
+
         zero_division=0
     )
 
     recall_values = recall_score(
+
         y_test,
+
         predictions,
+
         average=None,
-        labels=range(
-            len(
-                label_encoder.classes_
-            )
-        ),
+
+        labels=labels,
+
         zero_division=0
     )
 
     f1_values = f1_score(
+
         y_test,
+
         predictions,
+
         average=None,
-        labels=range(
-            len(
-                label_encoder.classes_
-            )
-        ),
+
+        labels=labels,
+
         zero_division=0
     )
 
     support_values = np.bincount(
+
         y_test,
+
         minlength=len(
             label_encoder.classes_
         )
@@ -787,7 +990,9 @@ def build_class_performance(
         label_encoder.classes_
     ):
 
-        result[str(class_name)] = {
+        result[
+            str(class_name)
+        ] = {
 
             "precision":
                 round(
@@ -878,20 +1083,30 @@ def build_roc_data(
 
         binary_actual = (
             y_test == class_id
-        ).astype(int)
+        ).astype(
+            int
+        )
 
-        # ROC cannot be calculated if the
-        # test set contains only one state
-        # for this class.
+        # ROC cannot be calculated if
+        # test data contains only one
+        # state for this class.
+
         if len(
-            np.unique(binary_actual)
+            np.unique(
+                binary_actual
+            )
         ) < 2:
+
+            class_name = (
+                label_encoder
+                .inverse_transform(
+                    [class_id]
+                )[0]
+            )
 
             print(
                 "Skipping ROC class:",
-                label_encoder.inverse_transform(
-                    [class_id]
-                )[0]
+                class_name
             )
 
             continue
@@ -901,8 +1116,13 @@ def build_roc_data(
             continue
 
         fpr, tpr, _ = roc_curve(
+
             binary_actual,
-            probabilities[:, class_id]
+
+            probabilities[
+                :,
+                class_id
+            ]
         )
 
         roc_auc = auc(
@@ -919,11 +1139,10 @@ def build_roc_data(
 
         roc_results.append(
             {
+
                 "class_name":
                     str(class_name),
 
-                # Also provide "class"
-                # for frontend compatibility.
                 "class":
                     str(class_name),
 
@@ -932,7 +1151,8 @@ def build_roc_data(
                         float(value),
                         6
                     )
-                    for value in fpr
+                    for value
+                    in fpr
                 ],
 
                 "tpr": [
@@ -940,7 +1160,8 @@ def build_roc_data(
                         float(value),
                         6
                     )
-                    for value in tpr
+                    for value
+                    in tpr
                 ],
 
                 "auc":
@@ -955,6 +1176,10 @@ def build_roc_data(
         "ROC curves generated:",
         len(roc_results)
     )
+
+    del probabilities
+
+    gc.collect()
 
     return roc_results
 
@@ -987,7 +1212,9 @@ def run_dataset_benchmark(df):
         label_column,
         original_records,
         excluded_classes
-    ) = prepare_dataset(df)
+    ) = prepare_dataset(
+        df
+    )
 
     print(
         "Records used:",
@@ -1010,7 +1237,9 @@ def run_dataset_benchmark(df):
     )
 
     if len(
-        np.unique(y_encoded)
+        np.unique(
+            y_encoded
+        )
     ) < 2:
 
         raise ValueError(
@@ -1022,14 +1251,22 @@ def run_dataset_benchmark(df):
     # TRAIN / TEST SPLIT
     # --------------------------------------------------------
 
-    X_train, X_test, y_train, y_test = (
-        train_test_split(
-            X,
-            y_encoded,
-            test_size=0.20,
-            random_state=RANDOM_STATE,
-            stratify=y_encoded
-        )
+    (
+        X_train,
+        X_test,
+        y_train,
+        y_test
+    ) = train_test_split(
+
+        X,
+
+        y_encoded,
+
+        test_size=0.20,
+
+        random_state=RANDOM_STATE,
+
+        stratify=y_encoded
     )
 
     print(
@@ -1062,20 +1299,56 @@ def run_dataset_benchmark(df):
         )
     )
 
-    X_train_processed = np.asarray(
-        X_train_processed,
-        dtype=np.float32
-    )
+    # --------------------------------------------------------
+    # KEEP BASELINE MATRIX SPARSE
+    # --------------------------------------------------------
 
-    X_test_processed = np.asarray(
-        X_test_processed,
-        dtype=np.float32
-    )
+    if hasattr(
+        X_train_processed,
+        "tocsr"
+    ):
+
+        X_train_processed = (
+            X_train_processed
+            .tocsr()
+            .astype(
+                np.float32
+            )
+        )
+
+        X_test_processed = (
+            X_test_processed
+            .tocsr()
+            .astype(
+                np.float32
+            )
+        )
+
+    else:
+
+        X_train_processed = np.asarray(
+            X_train_processed,
+            dtype=np.float32
+        )
+
+        X_test_processed = np.asarray(
+            X_test_processed,
+            dtype=np.float32
+        )
 
     print(
         "Processed features:",
         X_train_processed.shape[1]
     )
+
+    # --------------------------------------------------------
+    # RELEASE RAW DATAFRAME / PREPROCESSOR
+    # --------------------------------------------------------
+
+    del df
+    del preprocessor
+
+    gc.collect()
 
     # --------------------------------------------------------
     # BASELINE MODELS
@@ -1084,57 +1357,95 @@ def run_dataset_benchmark(df):
     models = {
 
         "Decision Tree":
+
             DecisionTreeClassifier(
-                random_state=RANDOM_STATE,
-                max_depth=20
+
+                random_state=
+                    RANDOM_STATE,
+
+                max_depth=10
             ),
 
         "Random Forest":
+
             RandomForestClassifier(
-                n_estimators=100,
-                random_state=RANDOM_STATE,
-                n_jobs=-1,
-                max_depth=20
+
+                n_estimators=30,
+
+                random_state=
+                    RANDOM_STATE,
+
+                n_jobs=1,
+
+                max_depth=10
             ),
 
         "XGBoost":
+
             XGBClassifier(
-                n_estimators=200,
-                max_depth=6,
+
+                n_estimators=50,
+
+                max_depth=4,
+
                 learning_rate=0.1,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                random_state=RANDOM_STATE,
-                n_jobs=-1,
-                eval_metric="mlogloss"
+
+                subsample=0.8,
+
+                colsample_bytree=0.8,
+
+                random_state=
+                    RANDOM_STATE,
+
+                n_jobs=1,
+
+                eval_metric=
+                    "mlogloss"
             ),
 
         "CatBoost":
+
             CatBoostClassifier(
-                iterations=200,
-                depth=6,
+
+                iterations=50,
+
+                depth=4,
+
                 learning_rate=0.1,
+
                 verbose=False,
-                random_seed=RANDOM_STATE
+
+                random_seed=
+                    RANDOM_STATE,
+
+                thread_count=1
             ),
 
         "LightGBM":
+
             LGBMClassifier(
-                n_estimators=200,
+
+                n_estimators=50,
+
                 learning_rate=0.1,
-                max_depth=-1,
-                random_state=RANDOM_STATE,
-                n_jobs=-1,
+
+                max_depth=8,
+
+                random_state=
+                    RANDOM_STATE,
+
+                n_jobs=1,
+
                 verbosity=-1
             )
     }
 
     comparison = []
 
-    fitted_models = {}
+    xgb_baseline_model = None
 
     # --------------------------------------------------------
-    # TRAIN BASELINE MODELS
+    # TRAIN BASELINES ONE AT A TIME
     # --------------------------------------------------------
 
     for name, model in models.items():
@@ -1144,15 +1455,22 @@ def run_dataset_benchmark(df):
             name
         )
 
-        result, fitted_model = (
-            evaluate_model(
-                name,
-                model,
-                X_train_processed,
-                X_test_processed,
-                y_train,
-                y_test
-            )
+        (
+            result,
+            fitted_model
+        ) = evaluate_model(
+
+            name,
+
+            model,
+
+            X_train_processed,
+
+            X_test_processed,
+
+            y_train,
+
+            y_test
         )
 
         predictions = result.pop(
@@ -1163,10 +1481,64 @@ def run_dataset_benchmark(df):
             result
         )
 
-        fitted_models[name] = (
-            fitted_model,
-            predictions
+        # ----------------------------------------------------
+        # KEEP ONLY BASELINE XGBOOST
+        # ----------------------------------------------------
+        #
+        # XGBoost is retained temporarily for ROC.
+        # All other models are released immediately.
+        #
+
+        if name == "XGBoost":
+
+            xgb_baseline_model = (
+                fitted_model
+            )
+
+        else:
+
+            del fitted_model
+
+        del model
+        del predictions
+
+        gc.collect()
+
+    del models
+
+    gc.collect()
+
+    # --------------------------------------------------------
+    # ROC FOR BASELINE XGBOOST
+    # --------------------------------------------------------
+    #
+    # Do this BEFORE the proposed model.
+    # This prevents two XGBoost models from staying in memory
+    # at the same time.
+    #
+
+    if xgb_baseline_model is not None:
+
+        roc_data = build_roc_data(
+
+            xgb_baseline_model,
+
+            X_test_processed,
+
+            y_test,
+
+            label_encoder
         )
+
+        del xgb_baseline_model
+
+        xgb_baseline_model = None
+
+        gc.collect()
+
+    else:
+
+        roc_data = []
 
     # --------------------------------------------------------
     # PROPOSED MODEL
@@ -1178,9 +1550,13 @@ def run_dataset_benchmark(df):
 
     proposed_result = (
         evaluate_proposed_model(
+
             X_train_processed,
+
             X_test_processed,
+
             y_train,
+
             y_test
         )
     )
@@ -1201,8 +1577,11 @@ def run_dataset_benchmark(df):
 
     proposed_confusion = (
         build_confusion_matrix(
+
             y_test,
+
             proposed_predictions,
+
             label_encoder
         )
     )
@@ -1213,29 +1592,13 @@ def run_dataset_benchmark(df):
 
     class_performance = (
         build_class_performance(
+
             y_test,
+
             proposed_predictions,
+
             label_encoder
         )
-    )
-
-    # --------------------------------------------------------
-    # ROC CURVE
-    #
-    # Use the trained XGBoost baseline.
-    # It has predict_proba(), which gives the
-    # probability required for ROC calculation.
-    # --------------------------------------------------------
-
-    xgb_model = fitted_models[
-        "XGBoost"
-    ][0]
-
-    roc_data = build_roc_data(
-        xgb_model,
-        X_test_processed,
-        y_test,
-        label_encoder
     )
 
     # --------------------------------------------------------
@@ -1244,11 +1607,14 @@ def run_dataset_benchmark(df):
 
     class_distribution = {}
 
-    unique_classes, class_counts = (
-        np.unique(
-            y_encoded,
-            return_counts=True
-        )
+    (
+        unique_classes,
+        class_counts
+    ) = np.unique(
+
+        y_encoded,
+
+        return_counts=True
     )
 
     for class_id, count in zip(
@@ -1265,10 +1631,44 @@ def run_dataset_benchmark(df):
 
         class_distribution[
             str(class_name)
-        ] = int(count)
+        ] = int(
+            count
+        )
 
     # --------------------------------------------------------
-    # RETURN RESULT
+    # SAVE SMALL VALUES BEFORE CLEANUP
+    # --------------------------------------------------------
+
+    records_used = int(
+        len(X)
+    )
+
+    feature_count = int(
+        X.shape[1]
+    )
+
+    train_records = int(
+        len(X_train)
+    )
+
+    test_records = int(
+        len(X_test)
+    )
+
+    class_names = [
+        str(value)
+        for value
+        in label_encoder.classes_
+    ]
+
+    class_count = int(
+        len(
+            label_encoder.classes_
+        )
+    )
+
+    # --------------------------------------------------------
+    # COMPLETION LOG
     # --------------------------------------------------------
 
     print(
@@ -1288,37 +1688,60 @@ def run_dataset_benchmark(df):
         "========================================"
     )
 
+    # --------------------------------------------------------
+    # RELEASE LARGE TEMPORARY OBJECTS
+    # --------------------------------------------------------
+
+    del X_train_processed
+    del X_test_processed
+
+    del X_train
+    del X_test
+
+    del y_train
+    del y_test
+
+    del X
+    del y
+    del y_encoded
+
+    del proposed_predictions
+    del label_encoder
+
+    gc.collect()
+
+    # --------------------------------------------------------
+    # FINAL RESULT
+    # --------------------------------------------------------
+
     return {
 
         "dataset": {
 
             "records_used":
-                int(len(X)),
+                records_used,
 
             "original_records":
-                int(original_records),
+                int(
+                    original_records
+                ),
 
             "excluded_rare_classes":
                 excluded_classes,
 
             "features":
-                int(X.shape[1]),
+                feature_count,
 
             "classes":
-                int(
-                    len(
-                        label_encoder.classes_
-                    )
-                ),
+                class_count,
 
             "label_column":
-                str(label_column),
+                str(
+                    label_column
+                ),
 
-            "class_names": [
-                str(value)
-                for value
-                in label_encoder.classes_
-            ],
+            "class_names":
+                class_names,
 
             "class_distribution":
                 class_distribution
@@ -1327,10 +1750,10 @@ def run_dataset_benchmark(df):
         "split": {
 
             "train_records":
-                int(len(X_train)),
+                train_records,
 
             "test_records":
-                int(len(X_test)),
+                test_records,
 
             "test_size":
                 0.20,
@@ -1348,9 +1771,6 @@ def run_dataset_benchmark(df):
         "class_performance":
             class_performance,
 
-        # IMPORTANT:
-        # Both keys are returned so the frontend
-        # can use either one.
         "roc":
             roc_data,
 
