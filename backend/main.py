@@ -1,5 +1,6 @@
 from pathlib import Path
 from io import BytesIO
+import gc
 import traceback
 
 import joblib
@@ -16,7 +17,11 @@ from .preprocessing.dataset_adapter import (
     is_kdd99_compatible,
 )
 
-from .training.dataset_benchmark import run_dataset_benchmark
+from .training.dataset_benchmark import (
+    run_dataset_benchmark,
+    find_label_column,
+    normalize_labels,
+)
 
 try:
     from .model_analysis import run_full_analysis
@@ -306,13 +311,30 @@ async def inspect_dataset(
                 detail="Please upload a CSV file.",
             )
 
-        contents = await file.read()
+        # ------------------------------------------------------------
+# MEMORY-SAFE CSV READING FOR RENDER
+# ------------------------------------------------------------
 
-        if not contents:
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded file is empty.",
-            )
+MAX_UPLOAD_EVAL_ROWS = 300
+
+try:
+    file.file.seek(0)
+
+    dataframe = pd.read_csv(
+        file.file,
+        nrows=MAX_UPLOAD_EVAL_ROWS
+    )
+
+except Exception as error:
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unable to read CSV file: {str(error)}"
+    )
+
+print(
+    f"Evaluation rows loaded: {len(dataframe)}"
+)
 
         dataframe = pd.read_csv(
             BytesIO(contents)
@@ -325,7 +347,7 @@ async def inspect_dataset(
             )
 
         information = get_dataset_info(
-            dataframe
+            datafcontrame
         )
 
         compatible = is_kdd99_compatible(
@@ -970,126 +992,207 @@ def analyze():
 async def analyze_uploaded_dataset(
     file: UploadFile = File(...)
 ):
+    """Evaluate an uploaded CSV without loading the complete file into RAM.
+
+    Render's small instances can run out of memory when a large CSV is read
+    completely into a pandas DataFrame. This endpoint therefore streams the
+    uploaded CSV in chunks and keeps only a bounded, class-aware sample for
+    the ML benchmark.
+    """
+
+    MAX_UPLOAD_EVAL_ROWS = 3000
+    CSV_CHUNK_SIZE = 5000
 
     try:
-
         if not file.filename:
-
             raise HTTPException(
                 status_code=400,
                 detail="No file was selected.",
             )
 
         if not file.filename.lower().endswith(".csv"):
-
             raise HTTPException(
                 status_code=400,
                 detail="Please upload a CSV file.",
             )
 
-        contents = await file.read()
+        # UploadFile uses a temporary file internally. Read it in chunks
+        # instead of calling await file.read(), which would put the complete
+        # CSV in RAM.
+        file.file.seek(0)
 
-        if not contents:
+        sample_parts = {}
+        total_rows = 0
+        total_class_distribution = {}
+        label_column = None
+        all_columns = None
 
-            raise HTTPException(
-                status_code=400,
-                detail="Uploaded file is empty.",
-            )
+        for chunk in pd.read_csv(
+            file.file,
+            chunksize=CSV_CHUNK_SIZE,
+            low_memory=False,
+        ):
+            if all_columns is None:
+                all_columns = chunk.columns.tolist()
 
-        dataframe = pd.read_csv(
-            BytesIO(contents)
-        )
+            total_rows += len(chunk)
 
-        if dataframe.empty:
+            if label_column is None:
+                label_column = find_label_column(chunk)
 
+            if label_column is not None and label_column in chunk.columns:
+                normalized_chunk_labels = normalize_labels(
+                    chunk[label_column]
+                )
+
+                counts = normalized_chunk_labels.value_counts()
+                for key, value in counts.items():
+                    key = str(key)
+                    total_class_distribution[key] = (
+                        total_class_distribution.get(key, 0)
+                        + int(value)
+                    )
+
+                # Keep a small reservoir for each normalized class. This
+                # protects rare attack groups such as R2L/U2R from being
+                # completely absent from the evaluation sample.
+                chunk = chunk.copy()
+                chunk["__normalized_target__"] = normalized_chunk_labels.values
+
+                per_class_limit = max(
+                    1,
+                    MAX_UPLOAD_EVAL_ROWS // 5
+                )
+
+                for class_name, class_data in chunk.groupby(
+                    "__normalized_target__",
+                    sort=False,
+                ):
+                    class_name = str(class_name)
+                    class_data = class_data.drop(
+                        columns=["__normalized_target__"]
+                    )
+
+                    current = sample_parts.get(class_name)
+
+                    if current is None:
+                        current = class_data
+                    else:
+                        current = pd.concat(
+                            [current, class_data],
+                            ignore_index=True,
+                        )
+
+                    if len(current) > per_class_limit:
+                        current = current.sample(
+                            n=per_class_limit,
+                            random_state=42,
+                        )
+
+                    sample_parts[class_name] = current.reset_index(
+                        drop=True
+                    )
+
+            # If the dataset has no recognizable label, retain a small
+            # random sample rather than the entire chunk.
+            else:
+                current = sample_parts.get("__unlabelled__")
+                if current is None:
+                    current = chunk
+                else:
+                    current = pd.concat(
+                        [current, chunk],
+                        ignore_index=True,
+                    )
+
+                if len(current) > MAX_UPLOAD_EVAL_ROWS:
+                    current = current.sample(
+                        n=MAX_UPLOAD_EVAL_ROWS,
+                        random_state=42,
+                    )
+
+                sample_parts["__unlabelled__"] = current.reset_index(
+                    drop=True
+                )
+
+        if total_rows == 0 or not all_columns:
             raise HTTPException(
                 status_code=400,
                 detail="CSV contains no records.",
             )
 
+        if label_column is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No label column found. Use one of: label, class, "
+                    "target, attack, attack_type, connection_type or category."
+                ),
+            )
+
+        sampled_frames = [
+            frame
+            for key, frame in sample_parts.items()
+            if key != "__unlabelled__" and not frame.empty
+        ]
+
+        if not sampled_frames:
+            raise HTTPException(
+                status_code=400,
+                detail="No usable records were found for evaluation.",
+            )
+
+        dataframe = pd.concat(
+            sampled_frames,
+            ignore_index=True,
+        )
+
+        if len(dataframe) > MAX_UPLOAD_EVAL_ROWS:
+            dataframe = dataframe.sample(
+                n=MAX_UPLOAD_EVAL_ROWS,
+                random_state=42,
+            ).reset_index(drop=True)
+
+        # Dataset information is calculated from the bounded sample so that
+        # the information endpoint cannot recreate the original memory spike.
+        information = get_dataset_info(dataframe)
+        compatible = is_kdd99_compatible(dataframe)
+
+        # Preserve the real uploaded row count when returning the result.
+        information["row_count"] = int(total_rows)
 
         print()
         print("=" * 60)
         print("UPLOADED DATASET ANALYSIS")
         print("=" * 60)
         print("File:", file.filename)
-        print("Rows:", len(dataframe))
-        print("Columns:", len(dataframe.columns))
+        print("Original rows:", total_rows)
+        print("Evaluation rows:", len(dataframe))
+        print("Columns:", len(all_columns))
+        print("Memory-safe chunked evaluation enabled")
         print("=" * 60)
 
+        # The benchmark itself applies its own defensive 3,000-row cap.
+        benchmark = run_dataset_benchmark(dataframe)
 
-        information = get_dataset_info(
-            dataframe
-        )
-
-        compatible = is_kdd99_compatible(
-            dataframe
-        )
-
-        label_column = information.get(
-            "label_column"
-        )
-
-        class_distribution = {}
-
-        if (
-            label_column
-            and
-            label_column in dataframe.columns
-        ):
-
-            counts = (
-                dataframe[label_column]
-                .astype(str)
-                .value_counts()
-                .to_dict()
-            )
-
-            class_distribution = {
-                str(key): int(value)
-                for key, value in counts.items()
-            }
-
-
-        # ----------------------------------------------------
-        # BENCHMARK
-        # ----------------------------------------------------
-
-        benchmark = run_dataset_benchmark(
-            dataframe
-        )
-
-
-        comparison = benchmark.get(
-            "comparison",
-            []
-        )
-
-
+        comparison = benchmark.get("comparison", [])
         metrics = {}
 
         if comparison:
-
             proposed = None
 
             for item in comparison:
-
                 name = str(
                     item.get(
-                        "model",
+                        "algorithm",
                         item.get(
-                            "name",
-                            ""
+                            "model",
+                            item.get("name", "")
                         )
                     )
                 ).lower()
 
-                if (
-                    "ialp" in name
-                    or
-                    "proposed" in name
-                ):
-
+                if "ialp" in name or "proposed" in name:
                     proposed = item
                     break
 
@@ -1097,190 +1200,100 @@ async def analyze_uploaded_dataset(
                 proposed = comparison[-1]
 
             metrics = {
-                "accuracy":
-                    proposed.get(
-                        "accuracy",
-                        0
-                    ),
-
-                "precision":
-                    proposed.get(
-                        "precision",
-                        proposed.get(
-                            "macro_precision",
-                            0
-                        )
-                    ),
-
-                "recall":
-                    proposed.get(
-                        "recall",
-                        proposed.get(
-                            "macro_recall",
-                            0
-                        )
-                    ),
-
-                "f1":
-                    proposed.get(
-                        "f1",
-                        proposed.get(
-                            "macro_f1",
-                            0
-                        )
-                    ),
-
-                "macro_precision":
-                    proposed.get(
-                        "macro_precision",
-                        proposed.get(
-                            "precision",
-                            0
-                        )
-                    ),
-
-                "macro_recall":
-                    proposed.get(
-                        "macro_recall",
-                        proposed.get(
-                            "recall",
-                            0
-                        )
-                    ),
-
-                "macro_f1":
-                    proposed.get(
-                        "macro_f1",
-                        proposed.get(
-                            "f1",
-                            0
-                        )
-                    ),
-
-                "weighted_f1":
-                    proposed.get(
-                        "weighted_f1",
-                        0
-                    ),
+                "accuracy": proposed.get("accuracy", 0),
+                "precision": proposed.get(
+                    "precision",
+                    proposed.get("macro_precision", 0),
+                ),
+                "recall": proposed.get(
+                    "recall",
+                    proposed.get("macro_recall", 0),
+                ),
+                "f1": proposed.get(
+                    "f1",
+                    proposed.get("macro_f1", 0),
+                ),
+                "macro_precision": proposed.get(
+                    "macro_precision",
+                    proposed.get("precision", 0),
+                ),
+                "macro_recall": proposed.get(
+                    "macro_recall",
+                    proposed.get("recall", 0),
+                ),
+                "macro_f1": proposed.get(
+                    "macro_f1",
+                    proposed.get("f1", 0),
+                ),
+                "weighted_f1": proposed.get("weighted_f1", 0),
             }
 
+        feature_count = len(all_columns) - 1
 
-        return {
+        # Release the upload sample before returning. This is especially
+        # useful on a 512 MB Render instance.
+        try:
+            file.file.close()
+        except Exception:
+            pass
 
-            "success":
-                True,
-
-            "filename":
-                file.filename,
-
+        result = {
+            "success": True,
+            "filename": file.filename,
             "dataset": {
-
-                "filename":
-                    file.filename,
-
-                "rows":
-                    len(dataframe),
-
-                "records":
-                    len(dataframe),
-
-                "columns":
-                    len(dataframe.columns),
-
-                "features":
-                    (
-                        len(dataframe.columns)
-                        -
-                        (
-                            1
-                            if label_column
-                            else 0
-                        )
-                    ),
-
-                "feature_count":
-                    (
-                        len(dataframe.columns)
-                        -
-                        (
-                            1
-                            if label_column
-                            else 0
-                        )
-                    ),
-
-                "classes":
-                    len(
-                        class_distribution
-                    ),
-
-                "class_count":
-                    len(
-                        class_distribution
-                    ),
-
-                "class_names":
-                    list(
-                        class_distribution.keys()
-                    ),
+                "filename": file.filename,
+                "rows": int(total_rows),
+                "records": int(total_rows),
+                "analysis_rows": int(len(dataframe)),
+                "columns": int(len(all_columns)),
+                "features": int(feature_count),
+                "feature_count": int(feature_count),
+                "classes": int(len(total_class_distribution)),
+                "class_count": int(len(total_class_distribution)),
+                "class_names": list(total_class_distribution.keys()),
             },
-
-            "compatible_with_current_model":
-                bool(compatible),
-
-            "label_column":
-                label_column,
-
-            "class_distribution":
-                class_distribution,
-
-            "metrics":
-                metrics,
-
-            "comparison":
-                comparison,
-
-            "model_comparison":
-                comparison,
-
-            "benchmark":
-                benchmark,
-
-            "confusion_matrix":
-                benchmark.get(
-                    "confusion_matrix",
-                    {}
-                ),
-
-            "roc":
-                benchmark.get(
-                    "roc",
-                    []
-                ),
-
-            "message":
-                "Dataset evaluation completed successfully.",
+            "compatible_with_current_model": bool(compatible),
+            "label_column": label_column,
+            "class_distribution": total_class_distribution,
+            "metrics": metrics,
+            "comparison": comparison,
+            "model_comparison": comparison,
+            "benchmark": benchmark,
+            "confusion_matrix": benchmark.get("confusion_matrix", {}),
+            "roc": benchmark.get("roc", []),
+            "analysis_limit": MAX_UPLOAD_EVAL_ROWS,
+            "message": (
+                "Dataset evaluation completed successfully using a "
+                f"memory-safe sample of up to {MAX_UPLOAD_EVAL_ROWS} records."
+            ),
         }
 
+        del dataframe
+        gc.collect()
+
+        return result
 
     except HTTPException:
         raise
 
     except Exception as error:
-
         print()
         print("UPLOADED DATASET ANALYSIS ERROR")
         print(error)
         print(traceback.format_exc())
 
+        try:
+            file.file.close()
+        except Exception:
+            pass
+
+        gc.collect()
+
         raise HTTPException(
             status_code=500,
             detail={
-                "message":
-                    "Uploaded dataset analysis failed.",
-
-                "error":
-                    str(error),
+                "message": "Uploaded dataset analysis failed.",
+                "error": str(error),
             },
         )
 

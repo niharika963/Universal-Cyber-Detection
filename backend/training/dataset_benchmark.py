@@ -36,7 +36,7 @@ RANDOM_STATE = 42
 
 # Render Free has a 512 MB RAM limit.
 # Keep interactive evaluation deliberately small.
-MAX_ROWS = 1500
+MAX_ROWS = 300
 
 
 # ============================================================
@@ -760,7 +760,7 @@ def evaluate_proposed_model(
 
     xgb = XGBClassifier(
 
-        n_estimators=50,
+        n_estimators=10,
 
         max_depth=4,
 
@@ -1353,96 +1353,55 @@ def run_dataset_benchmark(df):
     # --------------------------------------------------------
     # BASELINE MODELS
     # --------------------------------------------------------
+models = {
 
-    models = {
+    "Decision Tree":
+        DecisionTreeClassifier(
+            random_state=RANDOM_STATE,
+            max_depth=6
+        ),
 
-        "Decision Tree":
+    "Random Forest":
+        RandomForestClassifier(
+            n_estimators=5,
+            random_state=RANDOM_STATE,
+            n_jobs=1,
+            max_depth=6
+        ),
 
-            DecisionTreeClassifier(
+    "XGBoost":
+        XGBClassifier(
+            n_estimators=10,
+            max_depth=3,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=RANDOM_STATE,
+            n_jobs=1,
+            eval_metric="mlogloss"
+        ),
 
-                random_state=
-                    RANDOM_STATE,
+    "CatBoost":
+        CatBoostClassifier(
+            iterations=10,
+            depth=3,
+            learning_rate=0.1,
+            verbose=False,
+            random_seed=RANDOM_STATE,
+            thread_count=1
+        ),
 
-                max_depth=10
-            ),
-
-        "Random Forest":
-
-            RandomForestClassifier(
-
-                n_estimators=30,
-
-                random_state=
-                    RANDOM_STATE,
-
-                n_jobs=1,
-
-                max_depth=10
-            ),
-
-        "XGBoost":
-
-            XGBClassifier(
-
-                n_estimators=50,
-
-                max_depth=4,
-
-                learning_rate=0.1,
-
-                subsample=0.8,
-
-                colsample_bytree=0.8,
-
-                random_state=
-                    RANDOM_STATE,
-
-                n_jobs=1,
-
-                eval_metric=
-                    "mlogloss"
-            ),
-
-        "CatBoost":
-
-            CatBoostClassifier(
-
-                iterations=50,
-
-                depth=4,
-
-                learning_rate=0.1,
-
-                verbose=False,
-
-                random_seed=
-                    RANDOM_STATE,
-
-                thread_count=1
-            ),
-
-        "LightGBM":
-
-            LGBMClassifier(
-
-                n_estimators=50,
-
-                learning_rate=0.1,
-
-                max_depth=8,
-
-                random_state=
-                    RANDOM_STATE,
-
-                n_jobs=1,
-
-                verbosity=-1
-            )
-    }
-
-    comparison = []
-
-    xgb_baseline_model = None
+    "LightGBM":
+        LGBMClassifier(
+            n_estimators=10,
+            learning_rate=0.1,
+            max_depth=5,
+            random_state=RANDOM_STATE,
+            n_jobs=1,
+            verbosity=-1
+        )
+}
+  
 
     # --------------------------------------------------------
     # TRAIN BASELINES ONE AT A TIME
